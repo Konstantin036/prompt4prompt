@@ -64,10 +64,11 @@ def build_ts_ss_lines(data: dict, ss_id_filter=None) -> list:
     return lines
 
 
-def build_ts_ss_chains(data: dict, ss_id_filter=None, ts_ids=None) -> list:
+def build_ts_ss_chains(data: dict, ss_id_filter=None, ts_ids=None, ss_ids=None) -> list:
     """
     Returns list of (chain, ts_id) where chain is [ts_coords, ss1, ss2, ...]
     ordered by nearest-neighbor from the TS outward.
+    Only includes SS that are currently visible (ss_ids filter).
     """
     ts = data["transmission_stations"].set_index("Id")
     ss = data["substations"].set_index("Id")
@@ -79,6 +80,9 @@ def build_ts_ss_chains(data: dict, ss_id_filter=None, ts_ids=None) -> list:
         f33_id = row["Feeders33Id"]
         ss_id = row["SubstationsId"]
         if ss_id_filter is not None and int(ss_id) != ss_id_filter:
+            continue
+        # Preskoči SS koji nisu vidljivi
+        if ss_ids and int(ss_id) not in ss_ids:
             continue
         if f33_id not in f33.index or ss_id not in ss.index:
             continue
@@ -288,7 +292,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None,
     elif substation_filter is not None:
         ss_id_for_ts_filter = substation_filter
 
-    for chain, _ in build_ts_ss_chains(data, ss_id_filter=ss_id_for_ts_filter, ts_ids=ts_ids):
+    for chain, _ in build_ts_ss_chains(data, ss_id_filter=ss_id_for_ts_filter, ts_ids=ts_ids, ss_ids=ss_ids):
         folium.PolyLine(chain, color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
 
     for chain, chain_ss_id in build_ss_dt_chains(data, feeder11_filter, substation_filter, ss_ids):
