@@ -1,0 +1,583 @@
+# Feeder Load Analysis — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add a Streamlit section that displays instantaneous load factor (%) for all F11 and F33 feeders by comparing measured apparent power (V×I) against nominal transformer capacity (NameplateRating), with traffic-light coloring and separate no-readings tables.
+
+**Architecture:** New `vizualizacija/load.py` with four cached SQL queries, one pure `_color_load()` helper, and `show_load()` UI. `app.py` gets one import and one call added after `show_consumers()`. Current values only — mA unit for current (same as consumers.py).
+
+**Tech Stack:** Python, pandas, pymssql, Streamlit, plotly
+
+---
+
+## File Structure
+
+| File | Action | Responsibility |
+|---|---|---|
+| `vizualizacija/load.py` | Create | SQL queries, `_color_load`, `show_load()` |
+| `vizualizacija/app.py` | Modify | Import + call `show_load()` |
+| `tests/test_load.py` | Create | Unit tests for `_color_load()` |
+
+---
+
+### Task 1: Write failing tests for `_color_load`
+
+**Files:**
+- Create: `tests/test_load.py`
+
+- [ ] **Step 1: Create the test file**
+
+```python
+# tests/test_load.py
+from vizualizacija.load import _color_load
+
+
+def test_color_load_normal():
+    assert _color_load(50.0) == "Normalno"
+
+
+def test_color_load_warning():
+    assert _color_load(75.0) == "Upozorenje"
+
+
+def test_color_load_critical():
+    assert _color_load(90.0) == "Kritično"
+
+
+def test_color_load_boundary_70():
+    # exactly 70 → Upozorenje
+    assert _color_load(70.0) == "Upozorenje"
+
+
+def test_color_load_boundary_85():
+    # exactly 85 → Kritično
+    assert _color_load(85.0) == "Kritično"
+
+
+def test_color_load_zero():
+    assert _color_load(0.0) == "Normalno"
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+```bash
+cd c:/Users/Korisnik/OneDrive/Desktop/hakatoon
+pytest tests/test_load.py -v
+```
+
+Expected: all 6 FAIL with `ModuleNotFoundError: No module named 'vizualizacija.load'`
+
+---
+
+### Task 2: Implement `load.py` — queries and `_color_load`
+
+**Files:**
+- Create: `vizualizacija/load.py`
+
+- [ ] **Step 1: Create the file**
+
+```python
+# vizualizacija/load.py
+import pandas as pd
+import streamlit as st
+from db import get_connection
+
+_ZONE_COLORS = {
+    "Normalno":   "#2d6a2d",
+    "Upozorenje": "#997700",
+    "Kritično":   "#8b0000",
+}
+
+
+def _color_load(pct: float) -> str:
+    if pct >= 85:
+        return "Kritično"
+    if pct >= 70:
+        return "Upozorenje"
+    return "Normalno"
+
+
+@st.cache_data
+def load_f11() -> pd.DataFrame:
+    """Load factor per F11 feeder — measured S_kVA vs nominal NameplateRating."""
+    conn = get_connection()
+    try:
+        query = """
+        WITH latest_ts AS (
+            SELECT Mid, MAX(Ts) AS ts
+            FROM MeterReads
+            WHERE Cid IN (6,7,8,9,10,11)
+            GROUP BY Mid
+        ),
+        pivoted AS (
+            SELECT mr.Mid,
+                   MAX(CASE WHEN mr.Cid = 6  THEN mr.Val END) AS V_A,
+                   MAX(CASE WHEN mr.Cid = 7  THEN mr.Val END) AS V_B,
+                   MAX(CASE WHEN mr.Cid = 8  THEN mr.Val END) AS V_C,
+                   MAX(CASE WHEN mr.Cid = 9  THEN mr.Val END) AS I_A,
+                   MAX(CASE WHEN mr.Cid = 10 THEN mr.Val END) AS I_B,
+                   MAX(CASE WHEN mr.Cid = 11 THEN mr.Val END) AS I_C
+            FROM MeterReads mr
+            JOIN latest_ts lt ON lt.Mid = mr.Mid AND mr.Ts = lt.ts
+            WHERE mr.Cid IN (6,7,8,9,10,11)
+            GROUP BY mr.Mid
+        ),
+        s_dt AS (
+            SELECT Mid,
+                   ROUND((
+                       ISNULL(V_A * I_A, 0) +
+                       ISNULL(V_B * I_B, 0) +
+                       ISNULL(V_C * I_C, 0)
+                   ) / 1000000.0, 2) AS S_kVA
+            FROM pivoted
+            WHERE (V_A IS NOT NULL AND I_A IS NOT NULL)
+               OR (V_B IS NOT NULL AND I_B IS NOT NULL)
+               OR (V_C IS NOT NULL AND I_C IS NOT NULL)
+        ),
+        f11_load AS (
+            SELECT
+                d.Feeder11Id,
+                SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
+                SUM(d.NameplateRating) / 1000.0   AS S_nominal_kVA,
+                COUNT(*)                           AS dt_total,
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads
+            FROM DistributionSubstation d
+            LEFT JOIN s_dt s ON s.Mid = d.MeterId
+            WHERE d.Feeder11Id IS NOT NULL AND d.NameplateRating > 0
+            GROUP BY d.Feeder11Id
+        )
+        SELECT
+            ISNULL((
+                SELECT TOP 1 ts2.Name
+                FROM Feeder33Substation fs2
+                JOIN Feeders33 f33b ON f33b.Id = fs2.Feeders33Id
+                JOIN TransmissionStations ts2 ON ts2.Id = f33b.TsId
+                WHERE fs2.SubstationsId = f11.SsId
+            ), 'N/A')                                               AS [TS],
+            sub.Name                                                AS [Podstanica (SS)],
+            f11.Name                                                AS [Feeder11],
+            ROUND(fl.S_measured_kVA, 2)                            AS [S mereno (kVA)],
+            ROUND(fl.S_nominal_kVA, 2)                             AS [S nominalno (kVA)],
+            ROUND(fl.S_measured_kVA / fl.S_nominal_kVA * 100, 1)  AS [Opterećenje (%)],
+            fl.dt_with_reads                                        AS [DT merila],
+            fl.dt_total                                             AS [DT ukupno],
+            ROUND(fl.dt_with_reads * 100.0 / fl.dt_total, 0)      AS [Pokr. (%)]
+        FROM f11_load fl
+        JOIN Feeders11 f11   ON f11.Id  = fl.Feeder11Id
+        JOIN Substations sub ON sub.Id  = f11.SsId
+        WHERE fl.S_nominal_kVA > 0 AND fl.dt_with_reads > 0
+        ORDER BY [Opterećenje (%)] DESC
+        """
+        return pd.read_sql(query, conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data
+def load_f11_no_reads() -> pd.DataFrame:
+    """F11 feeders where no DT has V/I readings."""
+    conn = get_connection()
+    try:
+        query = """
+        WITH meters_with_reads AS (
+            SELECT DISTINCT Mid FROM MeterReads WHERE Cid IN (6,7,8,9,10,11)
+        ),
+        f11_stats AS (
+            SELECT
+                d.Feeder11Id,
+                COUNT(*)                                                     AS dt_total,
+                SUM(d.NameplateRating) / 1000.0                             AS S_nominal_kVA,
+                SUM(CASE WHEN mwr.Mid IS NOT NULL THEN 1 ELSE 0 END)        AS dt_with_reads
+            FROM DistributionSubstation d
+            LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
+            WHERE d.Feeder11Id IS NOT NULL
+            GROUP BY d.Feeder11Id
+        )
+        SELECT
+            ISNULL((
+                SELECT TOP 1 ts2.Name
+                FROM Feeder33Substation fs2
+                JOIN Feeders33 f33b ON f33b.Id = fs2.Feeders33Id
+                JOIN TransmissionStations ts2 ON ts2.Id = f33b.TsId
+                WHERE fs2.SubstationsId = f11.SsId
+            ), 'N/A')                        AS [TS],
+            sub.Name                         AS [Podstanica (SS)],
+            f11.Name                         AS [Feeder11],
+            fs.dt_total                      AS [DT ukupno],
+            ROUND(fs.S_nominal_kVA, 2)      AS [Nominalni kapacitet (kVA)]
+        FROM f11_stats fs
+        JOIN Feeders11 f11   ON f11.Id = fs.Feeder11Id
+        JOIN Substations sub ON sub.Id = f11.SsId
+        WHERE fs.dt_with_reads = 0
+        ORDER BY sub.Name, f11.Name
+        """
+        return pd.read_sql(query, conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data
+def load_f33() -> pd.DataFrame:
+    """Load factor per F33 feeder — sum of DT measured loads vs sum of DT ratings."""
+    conn = get_connection()
+    try:
+        query = """
+        WITH latest_ts AS (
+            SELECT Mid, MAX(Ts) AS ts
+            FROM MeterReads
+            WHERE Cid IN (6,7,8,9,10,11)
+            GROUP BY Mid
+        ),
+        pivoted AS (
+            SELECT mr.Mid,
+                   MAX(CASE WHEN mr.Cid = 6  THEN mr.Val END) AS V_A,
+                   MAX(CASE WHEN mr.Cid = 7  THEN mr.Val END) AS V_B,
+                   MAX(CASE WHEN mr.Cid = 8  THEN mr.Val END) AS V_C,
+                   MAX(CASE WHEN mr.Cid = 9  THEN mr.Val END) AS I_A,
+                   MAX(CASE WHEN mr.Cid = 10 THEN mr.Val END) AS I_B,
+                   MAX(CASE WHEN mr.Cid = 11 THEN mr.Val END) AS I_C
+            FROM MeterReads mr
+            JOIN latest_ts lt ON lt.Mid = mr.Mid AND mr.Ts = lt.ts
+            WHERE mr.Cid IN (6,7,8,9,10,11)
+            GROUP BY mr.Mid
+        ),
+        s_dt AS (
+            SELECT Mid,
+                   ROUND((
+                       ISNULL(V_A * I_A, 0) +
+                       ISNULL(V_B * I_B, 0) +
+                       ISNULL(V_C * I_C, 0)
+                   ) / 1000000.0, 2) AS S_kVA
+            FROM pivoted
+            WHERE (V_A IS NOT NULL AND I_A IS NOT NULL)
+               OR (V_B IS NOT NULL AND I_B IS NOT NULL)
+               OR (V_C IS NOT NULL AND I_C IS NOT NULL)
+        ),
+        dt_load AS (
+            SELECT
+                d.Feeder11Id,
+                SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
+                SUM(d.NameplateRating) / 1000.0   AS S_nominal_kVA,
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads,
+                COUNT(*)                           AS dt_total
+            FROM DistributionSubstation d
+            LEFT JOIN s_dt s ON s.Mid = d.MeterId
+            WHERE d.Feeder11Id IS NOT NULL AND d.NameplateRating > 0
+            GROUP BY d.Feeder11Id
+        ),
+        f33_load AS (
+            SELECT
+                fs.Feeders33Id,
+                SUM(dl.S_measured_kVA)             AS S_measured_kVA,
+                SUM(dl.S_nominal_kVA)              AS S_nominal_kVA,
+                SUM(dl.dt_with_reads)              AS dt_with_reads,
+                SUM(dl.dt_total)                   AS dt_total,
+                STRING_AGG(sub.Name, ', ')         AS ss_names
+            FROM dt_load dl
+            JOIN Feeders11 f11             ON f11.Id  = dl.Feeder11Id
+            JOIN Substations sub           ON sub.Id  = f11.SsId
+            JOIN Feeder33Substation fs     ON fs.SubstationsId = sub.Id
+            GROUP BY fs.Feeders33Id
+        )
+        SELECT
+            ts.Name                                                          AS [TS],
+            f33.Name                                                         AS [Feeder33],
+            fl.ss_names                                                      AS [Podstanice (SS)],
+            ROUND(fl.S_measured_kVA, 2)                                     AS [S mereno (kVA)],
+            ROUND(fl.S_nominal_kVA, 2)                                      AS [S nominalno (kVA)],
+            ROUND(fl.S_measured_kVA / fl.S_nominal_kVA * 100, 1)           AS [Opterećenje (%)],
+            fl.dt_with_reads                                                 AS [DT merila],
+            fl.dt_total                                                      AS [DT ukupno],
+            ROUND(fl.dt_with_reads * 100.0 / fl.dt_total, 0)               AS [Pokr. (%)]
+        FROM f33_load fl
+        JOIN Feeders33 f33             ON f33.Id  = fl.Feeders33Id
+        JOIN TransmissionStations ts   ON ts.Id   = f33.TsId
+        WHERE fl.S_nominal_kVA > 0 AND fl.dt_with_reads > 0
+        ORDER BY [Opterećenje (%)] DESC
+        """
+        return pd.read_sql(query, conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data
+def load_f33_no_reads() -> pd.DataFrame:
+    """F33 feeders where no connected DT has V/I readings."""
+    conn = get_connection()
+    try:
+        query = """
+        WITH meters_with_reads AS (
+            SELECT DISTINCT Mid FROM MeterReads WHERE Cid IN (6,7,8,9,10,11)
+        ),
+        dt_stats AS (
+            SELECT
+                d.Feeder11Id,
+                COUNT(*)                                                    AS dt_total,
+                SUM(d.NameplateRating) / 1000.0                            AS S_nominal_kVA,
+                SUM(CASE WHEN mwr.Mid IS NOT NULL THEN 1 ELSE 0 END)       AS dt_with_reads
+            FROM DistributionSubstation d
+            LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
+            WHERE d.Feeder11Id IS NOT NULL
+            GROUP BY d.Feeder11Id
+        ),
+        f33_stats AS (
+            SELECT
+                fs.Feeders33Id,
+                SUM(ds.dt_total)                    AS dt_total,
+                SUM(ds.S_nominal_kVA)               AS S_nominal_kVA,
+                SUM(ds.dt_with_reads)               AS dt_with_reads,
+                STRING_AGG(sub.Name, ', ')          AS ss_names
+            FROM dt_stats ds
+            JOIN Feeders11 f11             ON f11.Id  = ds.Feeder11Id
+            JOIN Substations sub           ON sub.Id  = f11.SsId
+            JOIN Feeder33Substation fs     ON fs.SubstationsId = sub.Id
+            GROUP BY fs.Feeders33Id
+        )
+        SELECT
+            ts.Name                              AS [TS],
+            f33.Name                             AS [Feeder33],
+            fss.ss_names                         AS [Podstanice (SS)],
+            fss.dt_total                         AS [DT ukupno],
+            ROUND(fss.S_nominal_kVA, 2)         AS [Nominalni kapacitet (kVA)]
+        FROM f33_stats fss
+        JOIN Feeders33 f33             ON f33.Id  = fss.Feeders33Id
+        JOIN TransmissionStations ts   ON ts.Id   = f33.TsId
+        WHERE fss.dt_with_reads = 0
+        ORDER BY ts.Name, f33.Name
+        """
+        return pd.read_sql(query, conn)
+    finally:
+        conn.close()
+```
+
+- [ ] **Step 2: Run the tests**
+
+```bash
+cd c:/Users/Korisnik/OneDrive/Desktop/hakatoon
+pytest tests/test_load.py -v
+```
+
+Expected: all 6 PASS.
+
+- [ ] **Step 3: Run all tests to check no regressions**
+
+```bash
+pytest tests/ -v
+```
+
+Expected: all tests PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add vizualizacija/load.py tests/test_load.py
+git commit -m "feat: add feeder load analysis queries and color helper"
+```
+
+---
+
+### Task 3: Implement `show_load()` UI
+
+**Files:**
+- Modify: `vizualizacija/load.py` (append `show_load` and `_render_load_section`)
+
+- [ ] **Step 1: Append the UI functions to `vizualizacija/load.py`**
+
+Add these two functions at the END of the existing file:
+
+```python
+def _render_load_section(
+    df: pd.DataFrame,
+    df_no: pd.DataFrame,
+    name_col: str,
+    section_label: str,
+) -> None:
+    if df.empty:
+        st.info(f"Nema mernih podataka za {section_label}.")
+    else:
+        df["Zona"] = df["Opterećenje (%)"].apply(_color_load)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"{section_label} u analizi", len(df))
+        col2.metric(
+            "Kritično opterećenih",
+            int((df["Zona"] == "Kritično").sum()),
+        )
+        col3.metric(
+            "Prosečno opterećenje",
+            f"{df['Opterećenje (%)'].mean():.1f}%",
+        )
+
+        import plotly.express as px
+
+        fig = px.bar(
+            df.sort_values("Opterećenje (%)"),
+            x="Opterećenje (%)",
+            y=name_col,
+            orientation="h",
+            color="Zona",
+            color_discrete_map=_ZONE_COLORS,
+            category_orders={"Zona": ["Normalno", "Upozorenje", "Kritično"]},
+            hover_data={
+                col: True
+                for col in df.columns
+                if col not in (name_col, "Zona")
+            },
+            height=max(400, len(df) * 22),
+        )
+        fig.update_layout(
+            xaxis={"range": [0, max(df["Opterećenje (%)"].max() * 1.1, 100)]},
+            yaxis={"categoryorder": "total ascending"},
+            margin={"l": 10, "r": 10, "t": 30, "b": 10},
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        def _highlight(row):
+            styles = [""] * len(row)
+            idx = df.columns.get_loc("Opterećenje (%)")
+            zone = _color_load(row["Opterećenje (%)"])
+            color = _ZONE_COLORS[zone]
+            styles[idx] = f"background-color: {color}; color: white"
+            return styles
+
+        display_cols = [c for c in df.columns if c != "Zona"]
+        st.dataframe(
+            df[display_cols].style.apply(_highlight, axis=1),
+            use_container_width=True,
+            height=400,
+        )
+
+    if not df_no.empty:
+        with st.expander(
+            f"{section_label} bez merenja ({len(df_no)}) — potreban terenski pregled",
+            expanded=False,
+        ):
+            st.dataframe(df_no, use_container_width=True)
+
+
+def show_load() -> None:
+    st.subheader("Opterećenje F11 fidera")
+    _render_load_section(
+        df=load_f11(),
+        df_no=load_f11_no_reads(),
+        name_col="Feeder11",
+        section_label="F11 fidera",
+    )
+
+    st.divider()
+
+    st.subheader("Opterećenje F33 fidera")
+    _render_load_section(
+        df=load_f33(),
+        df_no=load_f33_no_reads(),
+        name_col="Feeder33",
+        section_label="F33 fidera",
+    )
+```
+
+- [ ] **Step 2: Run all tests**
+
+```bash
+cd c:/Users/Korisnik/OneDrive/Desktop/hakatoon
+pytest tests/ -v
+```
+
+Expected: all tests PASS (UI functions don't affect unit tests).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add vizualizacija/load.py
+git commit -m "feat: add show_load Streamlit UI with plotly bar charts"
+```
+
+---
+
+### Task 4: Wire up in `app.py` and push
+
+**Files:**
+- Modify: `vizualizacija/app.py`
+
+- [ ] **Step 1: Add import**
+
+In `vizualizacija/app.py`, after the existing imports, add:
+
+```python
+from load import show_load
+```
+
+The full imports block becomes:
+
+```python
+import streamlit as st
+from streamlit_folium import st_folium
+
+from db import load_data
+from losses import show_losses
+from consumers import show_consumers
+from load import show_load
+from map_view import create_map
+from stats import show_stats
+```
+
+- [ ] **Step 2: Add `show_load()` call after `show_consumers()`**
+
+Find:
+
+```python
+# --- Estimacija potrošača ---
+show_consumers()
+
+# --- Tabele ---
+```
+
+Replace with:
+
+```python
+# --- Estimacija potrošača ---
+show_consumers()
+
+# --- Opterećenje fidera ---
+show_load()
+
+# --- Tabele ---
+```
+
+- [ ] **Step 3: Run all tests**
+
+```bash
+cd c:/Users/Korisnik/OneDrive/Desktop/hakatoon
+pytest tests/ -v
+```
+
+Expected: all tests PASS.
+
+- [ ] **Step 4: Commit and push**
+
+```bash
+git add vizualizacija/app.py
+git commit -m "feat: wire feeder load analysis into main app"
+git push
+```
+
+---
+
+## Self-Review
+
+**1. Spec coverage:**
+- ✅ F11 load factor query with S_measured / S_nominal
+- ✅ F33 load factor query (DT subtree aggregation)
+- ✅ No-reads tables for both F11 and F33
+- ✅ Traffic light zones: <70 Normalno, 70-85 Upozorenje, ≥85 Kritično
+- ✅ Bar chart per section colored by zone
+- ✅ Color-coded dataframe
+- ✅ Expander for no-reads feeders
+- ✅ `show_load()` calls both sections with divider
+
+**2. Placeholder scan:** None found. All SQL and Python code is complete.
+
+**3. Type consistency:**
+- `_color_load(pct: float) -> str` defined in Task 2, used in Task 3 ✅
+- `_ZONE_COLORS` dict defined in Task 2, used in Task 3 ✅
+- `load_f11()`, `load_f11_no_reads()`, `load_f33()`, `load_f33_no_reads()` all defined in Task 2, called in Task 3 ✅
+- `_render_load_section(df, df_no, name_col, section_label)` defined and called in Task 3 ✅
