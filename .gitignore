@@ -5,3 +5,5 @@ __pycache__/
 .streamlit/
 *.egg-info/
 dist/
+.claude/
+hackathon_2026/
