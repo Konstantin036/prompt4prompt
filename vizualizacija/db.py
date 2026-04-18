@@ -1,13 +1,16 @@
-import pymssql
+import os
+
 import pandas as pd
+import pymssql
 import streamlit as st
 
 _DB_CONFIG = {
-    "server": "localhost",
-    "port": 1433,
-    "database": "SotexHackathon",
-    "user": "sa",
-    "password": "SotexSolutions123!",
+    "server": os.getenv("DB_SERVER", "localhost"),
+    "port": int(os.getenv("DB_PORT", "1433")),
+    "database": os.getenv("DB_NAME", "SotexHackathon"),
+    "user": os.getenv("DB_USER", "sa"),
+    "password": os.getenv("DB_PASSWORD", "SotexSolutions123!"),
+    "login_timeout": 5,
 }
 
 
