@@ -79,10 +79,13 @@ def show_losses() -> None:
         st.warning("Nema podataka za analizu gubitaka.")
         return
 
+    valid = df[df["Gubici (%)"] >= 0].copy()
+    invalid = df[df["Gubici (%)"] < 0].copy()
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("SS u analizi", len(df))
-    col2.metric("Ukupni gubici (MWh)", f"{df['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici (%)", f"{df['Gubici (%)'].mean():.1f}%")
+    col1.metric("SS u analizi", len(valid))
+    col2.metric("Ukupni gubici (MWh)", f"{valid['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosečni gubici (%)", f"{valid['Gubici (%)'].mean():.1f}%")
 
     def highlight_losses(val):
         if isinstance(val, float):
@@ -94,5 +97,14 @@ def show_losses() -> None:
                 return "background-color: #997700; color: white"
         return ""
 
-    styled = df.style.map(highlight_losses, subset=["Gubici (%)"])
+    styled = valid.style.map(highlight_losses, subset=["Gubici (%)"])
     st.dataframe(styled, use_container_width=True, height=500)
+
+    if not invalid.empty:
+        with st.expander(f"⚠️ {len(invalid)} SS sa negativnim gubicima (problem mernih podataka)"):
+            st.caption(
+                "Ove SS imaju F11 sumu veću od F33 energije. "
+                "Uzrok je neusklađenost kumulativnih merila — merila F11 i F33 nisu počela da rade u isto vreme "
+                "ili su neka bila resetovana. Ovi slučajevi nisu uključeni u prosek."
+            )
+            st.dataframe(invalid, use_container_width=True)
