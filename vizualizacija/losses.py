@@ -4,6 +4,80 @@ from db import get_connection
 
 
 @st.cache_data
+def load_f11_losses() -> pd.DataFrame:
+    conn = get_connection()
+    try:
+        query = """
+        WITH has_reads AS (
+            SELECT DISTINCT Mid FROM MeterReadTfes
+        ),
+        dt_coverage AS (
+            SELECT d.Feeder11Id,
+                   COUNT(*)                                                         AS total_dt,
+                   SUM(CASE WHEN d.MeterId IS NOT NULL AND hr.Mid IS NOT NULL
+                            THEN 1 ELSE 0 END)                                      AS dt_with_reads
+            FROM   DistributionSubstation d
+            LEFT JOIN has_reads hr ON hr.Mid = d.MeterId
+            WHERE  d.Feeder11Id IS NOT NULL
+            GROUP BY d.Feeder11Id
+        ),
+        latest_f11 AS (
+            SELECT f.Id    AS f11_id,
+                   f.Name  AS f11_name,
+                   f.SsId,
+                   f.TsId,
+                   t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh
+            FROM   Feeders11 f
+            JOIN   Meters m ON m.Id = f.MeterId
+            JOIN   (
+                SELECT Mid, Val,
+                       ROW_NUMBER() OVER (PARTITION BY Mid ORDER BY Ts DESC) AS rn
+                FROM   MeterReadTfes
+            ) t ON t.Mid = f.MeterId AND t.rn = 1
+            WHERE  f.MeterId IS NOT NULL
+        ),
+        latest_dt AS (
+            SELECT d.Feeder11Id,
+                   SUM(t.Val * ISNULL(m.MultiplierFactor, 1)) AS dt_total_wh
+            FROM   DistributionSubstation d
+            JOIN   Meters m ON m.Id = d.MeterId
+            JOIN   (
+                SELECT Mid, Val,
+                       ROW_NUMBER() OVER (PARTITION BY Mid ORDER BY Ts DESC) AS rn
+                FROM   MeterReadTfes
+            ) t ON t.Mid = d.MeterId AND t.rn = 1
+            WHERE  d.MeterId IS NOT NULL
+            GROUP BY d.Feeder11Id
+        )
+        SELECT ISNULL(
+                   (SELECT TOP 1 ts2.Name
+                    FROM Feeder33Substation fs2
+                    JOIN Feeders33 f33b ON f33b.Id = fs2.Feeders33Id
+                    JOIN TransmissionStations ts2 ON ts2.Id = f33b.TsId
+                    WHERE fs2.SubstationsId = f11.SsId), 'N/A')                    AS [TS],
+               s.Name                                                              AS [Podstanica (SS)],
+               f11.f11_name                                                        AS [Feeder11],
+               ROUND(f11.energy_wh  / 1000000.0, 2)                               AS [F11 (MWh)],
+               ROUND(ld.dt_total_wh / 1000000.0, 2)                               AS [DT Suma (MWh)],
+               ROUND((f11.energy_wh - ld.dt_total_wh) / 1000000.0, 2)             AS [Gubici (MWh)],
+               ROUND((f11.energy_wh - ld.dt_total_wh) / f11.energy_wh * 100, 2)   AS [Gubici (%)],
+               dc.dt_with_reads                                                    AS [DT merila],
+               dc.total_dt                                                         AS [DT ukupno],
+               ROUND(dc.dt_with_reads * 100.0 / dc.total_dt, 0)                   AS [Pokr. (%)]
+        FROM   latest_f11 f11
+        JOIN   Substations s  ON s.Id          = f11.SsId
+        JOIN   latest_dt ld   ON ld.Feeder11Id = f11.f11_id
+        JOIN   dt_coverage dc ON dc.Feeder11Id = f11.f11_id
+        WHERE  f11.energy_wh > 0
+        ORDER BY [Gubici (%)] DESC
+        """
+        df = pd.read_sql(query, conn)
+        return df
+    finally:
+        conn.close()
+
+
+@st.cache_data
 def load_losses() -> pd.DataFrame:
     conn = get_connection()
     try:
@@ -133,4 +207,42 @@ def show_losses() -> None:
         "🟦 negativni (neusklađena merila) | "
         "🟨 nepouzdani (nepotpuna merila ili deljeni F33) | "
         "🟥 >20% | 🟧 >10% | 🟨 >5%"
+    )
+
+    st.divider()
+    st.subheader("Analiza gubitaka po Feeder11 fiderima")
+
+    df11 = load_f11_losses()
+
+    if df11.empty:
+        st.warning("Nema F11 podataka za analizu gubitaka.")
+        return
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("F11 fidera u analizi", len(df11))
+    col2.metric("Ukupni gubici F11 (MWh)", f"{df11['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosečni gubici F11 (%)", f"{df11['Gubici (%)'].mean():.1f}%")
+
+    def highlight_f11(row):
+        styles = [""] * len(row)
+        pct = row.get("Gubici (%)", 0)
+        pokr = row.get("Pokr. (%)", 100)
+        loss_col = df11.columns.get_loc("Gubici (%)")
+        if pct < 0:
+            styles[loss_col] = "background-color: #1a1a6e; color: white"
+        elif pokr < 100:
+            styles[loss_col] = "background-color: #4a4a00; color: white"
+        elif pct > 20:
+            styles[loss_col] = "background-color: #8b0000; color: white"
+        elif pct > 10:
+            styles[loss_col] = "background-color: #cc4400; color: white"
+        elif pct > 5:
+            styles[loss_col] = "background-color: #997700; color: white"
+        return styles
+
+    styled11 = df11.style.apply(highlight_f11, axis=1)
+    st.dataframe(styled11, use_container_width=True, height=600)
+    st.caption(
+        "Gubici F11 = F11 energija − Zbir DT merila na tom fideru. "
+        "Boje: 🟦 negativni | 🟨 nepotpuna DT merila | 🟥 >20% | 🟧 >10% | 🟨 >5%"
     )
