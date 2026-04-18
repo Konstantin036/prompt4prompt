@@ -11,8 +11,14 @@ def load_losses() -> pd.DataFrame:
         WITH has_reads AS (
             SELECT DISTINCT Mid FROM MeterReadTfes
         ),
+        exclusive_f33 AS (
+            -- F33 fideri koji idu u TACNO jednu SS (1:1 veza — merenje je pouzdano)
+            SELECT Feeders33Id
+            FROM   Feeder33Substation
+            GROUP BY Feeders33Id
+            HAVING COUNT(DISTINCT SubstationsId) = 1
+        ),
         f11_coverage AS (
-            -- Ukupan broj F11 fidera po SS i koliko ih ima merila sa ocitavanjima
             SELECT f.SsId,
                    COUNT(*)                                                       AS total_f11,
                    SUM(CASE WHEN f.MeterId IS NOT NULL AND hr.Mid IS NOT NULL
@@ -26,6 +32,7 @@ def load_losses() -> pd.DataFrame:
                    f.Name AS f33_name,
                    t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh
             FROM   Feeders33 f
+            JOIN   exclusive_f33 ef ON ef.Feeders33Id = f.Id
             JOIN   Meters m ON m.Id = f.MeterId
             JOIN   (
                 SELECT Mid, Val,
