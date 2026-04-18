@@ -1,6 +1,6 @@
 import pandas as pd
 import folium
-from vizualizacija.map_view import get_map_center, build_ts_ss_lines, build_ss_dt_lines, create_map
+from vizualizacija.map_view import get_map_center, build_ts_ss_lines, build_ss_dt_lines, create_map, _valid_coords
 
 
 def _make_data():
@@ -54,3 +54,34 @@ def test_build_ss_dt_lines():
 def test_create_map_returns_folium_map():
     m = create_map(_make_data())
     assert isinstance(m, folium.Map)
+
+
+def test_valid_coords_rejects_null_island():
+    assert _valid_coords(0.0, 0.0) is False
+    assert _valid_coords(0.1, 0.1) is False
+
+
+def test_valid_coords_accepts_real_coords():
+    assert _valid_coords(44.0, 21.0) is True
+
+
+def test_get_map_center_ignores_null_island():
+    data = _make_data()
+    # dodaj DT sa (0,0) koordinatama — treba da bude ignorisan
+    data["distribution_substations"] = pd.concat([
+        data["distribution_substations"],
+        pd.DataFrame({"Id": [101], "Name": ["Bad"], "Feeder11Id": [None],
+                      "NameplateRating": [0], "Latitude": [0.0], "Longitude": [0.0]}),
+    ], ignore_index=True)
+    center = get_map_center(data)
+    assert abs(center[0] - 44.1) < 0.5
+
+
+def test_build_ts_ss_lines_with_ss_filter():
+    data = _make_data()
+    # sa filterom na ss_id=10 treba da vrati 1 liniju
+    lines = build_ts_ss_lines(data, ss_id_filter=10)
+    assert len(lines) == 1
+    # sa filterom na nepostojeci ss_id treba da vrati 0 linija
+    lines_empty = build_ts_ss_lines(data, ss_id_filter=99)
+    assert len(lines_empty) == 0

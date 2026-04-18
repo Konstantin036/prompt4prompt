@@ -2,18 +2,29 @@ import folium
 import pandas as pd
 
 
+def _valid_coords(lat, lon) -> bool:
+    if pd.isna(lat) or pd.isna(lon):
+        return False
+    # Odbaci koordinate bliske (0, 0) — "null island" u Atlantiku
+    if abs(float(lat)) < 0.5 and abs(float(lon)) < 0.5:
+        return False
+    return True
+
+
 def get_map_center(data: dict) -> list:
     lats, lons = [], []
     for key in ("transmission_stations", "substations", "distribution_substations"):
         df = data[key]
-        lats.extend(df["Latitude"].dropna().tolist())
-        lons.extend(df["Longitude"].dropna().tolist())
+        for _, row in df.iterrows():
+            if _valid_coords(row.get("Latitude"), row.get("Longitude")):
+                lats.append(float(row["Latitude"]))
+                lons.append(float(row["Longitude"]))
     if not lats:
         return [44.0, 21.0]
     return [sum(lats) / len(lats), sum(lons) / len(lons)]
 
 
-def build_ts_ss_lines(data: dict) -> list:
+def build_ts_ss_lines(data: dict, ss_id_filter=None) -> list:
     ts = data["transmission_stations"].set_index("Id")
     ss = data["substations"].set_index("Id")
     f33 = data["feeders33"].set_index("Id")
@@ -21,6 +32,9 @@ def build_ts_ss_lines(data: dict) -> list:
     for _, row in data["feeder33_substation"].iterrows():
         f33_id = row["Feeders33Id"]
         ss_id = row["SubstationsId"]
+        # Filtriraj na specifičan SS kada je aktivan filter
+        if ss_id_filter is not None and int(ss_id) != ss_id_filter:
+            continue
         if f33_id not in f33.index or ss_id not in ss.index:
             continue
         ts_id = f33.loc[f33_id, "TsId"]
@@ -28,7 +42,9 @@ def build_ts_ss_lines(data: dict) -> list:
             continue
         ts_row = ts.loc[int(ts_id)]
         ss_row = ss.loc[ss_id]
-        if pd.isna(ts_row["Latitude"]) or pd.isna(ts_row["Longitude"]) or pd.isna(ss_row["Latitude"]) or pd.isna(ss_row["Longitude"]):
+        if not _valid_coords(ts_row["Latitude"], ts_row["Longitude"]):
+            continue
+        if not _valid_coords(ss_row["Latitude"], ss_row["Longitude"]):
             continue
         lines.append(
             ([float(ts_row["Latitude"]), float(ts_row["Longitude"])],
@@ -57,13 +73,23 @@ def build_ss_dt_lines(data: dict, feeder11_filter=None, substation_filter=None) 
         if pd.isna(ss_id) or int(ss_id) not in ss.index:
             continue
         ss_row = ss.loc[int(ss_id)]
-        if pd.isna(dt_row["Latitude"]) or pd.isna(dt_row["Longitude"]) or pd.isna(ss_row["Latitude"]) or pd.isna(ss_row["Longitude"]):
+        if not _valid_coords(dt_row["Latitude"], dt_row["Longitude"]):
+            continue
+        if not _valid_coords(ss_row["Latitude"], ss_row["Longitude"]):
             continue
         lines.append(
             ([float(ss_row["Latitude"]), float(ss_row["Longitude"])],
              [float(dt_row["Latitude"]), float(dt_row["Longitude"])])
         )
     return lines
+
+
+def _get_ss_id_for_feeder11(data: dict, feeder11_id: int):
+    f11 = data["feeders11"].set_index("Id")
+    if feeder11_id not in f11.index:
+        return None
+    ss_id = f11.loc[feeder11_id, "SsId"]
+    return int(ss_id) if not pd.isna(ss_id) else None
 
 
 def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> folium.Map:
@@ -73,11 +99,12 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
     ts_group = folium.FeatureGroup(name="Transmission Stations", show=True)
     ss_group = folium.FeatureGroup(name="Substations", show=True)
     dt_group = folium.FeatureGroup(name="Distribution Substations (DT)", show=True)
+    dt_no_conn_group = folium.FeatureGroup(name="DT bez veze (nisu u topologiji)", show=False)
     ts_ss_group = folium.FeatureGroup(name="TS → SS veze", show=True)
     ss_dt_group = folium.FeatureGroup(name="SS → DT veze", show=True)
 
     for _, row in data["transmission_stations"].iterrows():
-        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
+        if not _valid_coords(row["Latitude"], row["Longitude"]):
             continue
         folium.Marker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
@@ -86,7 +113,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
         ).add_to(ts_group)
 
     for _, row in data["substations"].iterrows():
-        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
+        if not _valid_coords(row["Latitude"], row["Longitude"]):
             continue
         folium.Marker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
@@ -102,26 +129,38 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
         valid_ids = f11[f11["SsId"] == substation_filter].index.tolist()
         dt_data = dt_data[dt_data["Feeder11Id"].isin(valid_ids)]
 
+    connected_f11_ids = set(f11.index)
     for _, row in dt_data.iterrows():
-        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
+        if not _valid_coords(row["Latitude"], row["Longitude"]):
             continue
-        folium.CircleMarker(
+        f11_id = row["Feeder11Id"]
+        is_connected = (not pd.isna(f11_id)) and (int(f11_id) in connected_f11_ids)
+        marker = folium.CircleMarker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
             radius=6,
-            color="green",
+            color="green" if is_connected else "gray",
             fill=True,
-            fill_color="green",
+            fill_color="green" if is_connected else "gray",
             fill_opacity=0.7,
-            popup=f"<b>{row['Name']}</b><br>Id: {row['Id']}<br>Snaga: {row['NameplateRating']} kVA",
-        ).add_to(dt_group)
+            popup=f"<b>{row['Name']}</b><br>Id: {row['Id']}<br>Snaga: {row['NameplateRating']} kVA"
+                  + ("" if is_connected else "<br><i>Nema Feeder11 veze</i>"),
+        )
+        marker.add_to(dt_group if is_connected else dt_no_conn_group)
 
-    for ts_coords, ss_coords in build_ts_ss_lines(data):
+    # Filtriraj TS→SS linije na relevantan SS kada je feeder11 ili substation izabran
+    ss_id_for_ts_filter = None
+    if feeder11_filter is not None:
+        ss_id_for_ts_filter = _get_ss_id_for_feeder11(data, feeder11_filter)
+    elif substation_filter is not None:
+        ss_id_for_ts_filter = substation_filter
+
+    for ts_coords, ss_coords in build_ts_ss_lines(data, ss_id_filter=ss_id_for_ts_filter):
         folium.PolyLine([ts_coords, ss_coords], color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
 
     for ss_coords, dt_coords in build_ss_dt_lines(data, feeder11_filter, substation_filter):
         folium.PolyLine([ss_coords, dt_coords], color="green", weight=1.5, opacity=0.6).add_to(ss_dt_group)
 
-    for group in (ts_group, ss_group, dt_group, ts_ss_group, ss_dt_group):
+    for group in (ts_group, ss_group, dt_group, dt_no_conn_group, ts_ss_group, ss_dt_group):
         group.add_to(m)
     folium.LayerControl().add_to(m)
     return m
