@@ -3,6 +3,7 @@ from streamlit_folium import st_folium
 
 from db import load_data
 from losses import show_losses
+from consumers import show_consumers
 from map_view import create_map
 from stats import show_stats
 
@@ -93,6 +94,9 @@ st_folium(m, use_container_width=True, height=600, returned_objects=[])
 
 # --- Analiza gubitaka ---
 show_losses()
+
+# --- Estimacija potrošača ---
+show_consumers()
 
 # --- Tabele ---
 st.subheader("Podaci iz baze")
