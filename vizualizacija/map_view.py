@@ -14,6 +14,11 @@ def _build_ss_color_map(data: dict) -> dict:
     return {int(ss_id): _SS_PALETTE[i % len(_SS_PALETTE)] for i, ss_id in enumerate(ss_ids)}
 
 
+def _build_f11_color_map(data: dict) -> dict:
+    f11_ids = data["feeders11"]["Id"].tolist()
+    return {int(f11_id): _SS_PALETTE[i % len(_SS_PALETTE)] for i, f11_id in enumerate(f11_ids)}
+
+
 def _valid_coords(lat, lon) -> bool:
     if pd.isna(lat) or pd.isna(lon):
         return False
@@ -170,7 +175,7 @@ def build_ss_dt_chains(data: dict, feeder11_filter=None, substation_filter=None,
             continue
         ss_point = [float(ss_row["Latitude"]), float(ss_row["Longitude"])]
         ordered = _nearest_neighbor_chain(ss_point, dt_points)
-        chains.append(([ss_point] + ordered, ss_id_int))
+        chains.append(([ss_point] + ordered, ss_id_int, f11_id_int))
 
     return chains
 
@@ -239,6 +244,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None,
         ).add_to(ts_group)
 
     ss_color_map = _build_ss_color_map(data)
+    f11_color_map = _build_f11_color_map(data)
     ss_data = data["substations"]
     if ss_ids:
         ss_data = ss_data[ss_data["Id"].isin(ss_ids)]
@@ -298,8 +304,8 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None,
     for chain, _ in build_ts_ss_chains(data, ss_id_filter=ss_id_for_ts_filter, ts_ids=ts_ids, ss_ids=ss_ids):
         folium.PolyLine(chain, color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
 
-    for chain, chain_ss_id in build_ss_dt_chains(data, feeder11_filter, substation_filter, ss_ids):
-        color = ss_color_map.get(chain_ss_id, "#4daf4a")
+    for chain, chain_ss_id, chain_f11_id in build_ss_dt_chains(data, feeder11_filter, substation_filter, ss_ids):
+        color = f11_color_map.get(chain_f11_id, "#4daf4a")
         folium.PolyLine(chain, color=color, weight=1.5, opacity=0.7).add_to(ss_dt_group)
 
     for group in (ts_group, ss_group, dt_group, dt_no_conn_group, ts_ss_group, ss_dt_group):

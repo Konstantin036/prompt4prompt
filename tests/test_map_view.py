@@ -91,12 +91,13 @@ def test_build_ss_dt_chains_returns_chain_starting_at_ss():
     data = _make_data()
     chains = build_ss_dt_chains(data)
     assert len(chains) == 1
-    chain, ss_id = chains[0]
+    chain, ss_id, f11_id = chains[0]
     # Chain počinje na SS koordinatama
     assert chain[0] == [44.1, 21.1]
     # Chain ima SS + DT = 2 tačke
     assert len(chain) == 2
     assert ss_id == 10
+    assert f11_id == 200
 
 
 def test_build_ts_ss_chains_returns_chain_starting_at_ts():
