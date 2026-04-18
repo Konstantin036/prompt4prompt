@@ -269,3 +269,93 @@ def load_f33_no_reads() -> pd.DataFrame:
         return pd.read_sql(query, conn)
     finally:
         conn.close()
+
+
+def _render_load_section(
+    df: pd.DataFrame,
+    df_no: pd.DataFrame,
+    name_col: str,
+    section_label: str,
+) -> None:
+    if df.empty:
+        st.info(f"Nema mernih podataka za {section_label}.")
+    else:
+        df = df.copy()
+        df["Zona"] = df["Opterećenje (%)"].apply(_color_load)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"{section_label} u analizi", len(df))
+        col2.metric(
+            "Kritično opterećenih",
+            int((df["Zona"] == "Kritično").sum()),
+        )
+        col3.metric(
+            "Prosečno opterećenje",
+            f"{df['Opterećenje (%)'].mean():.1f}%",
+        )
+
+        import plotly.express as px
+
+        fig = px.bar(
+            df.sort_values("Opterećenje (%)"),
+            x="Opterećenje (%)",
+            y=name_col,
+            orientation="h",
+            color="Zona",
+            color_discrete_map=_ZONE_COLORS,
+            category_orders={"Zona": ["Normalno", "Upozorenje", "Kritično"]},
+            hover_data={
+                col: True
+                for col in df.columns
+                if col not in (name_col, "Zona")
+            },
+            height=max(400, len(df) * 22),
+        )
+        fig.update_layout(
+            xaxis={"range": [0, max(df["Opterećenje (%)"].max() * 1.1, 100)]},
+            yaxis={"categoryorder": "total ascending"},
+            margin={"l": 10, "r": 10, "t": 30, "b": 10},
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        def _highlight(row):
+            styles = [""] * len(row)
+            idx = df.columns.get_loc("Opterećenje (%)")
+            zone = _color_load(row["Opterećenje (%)"])
+            color = _ZONE_COLORS[zone]
+            styles[idx] = f"background-color: {color}; color: white"
+            return styles
+
+        display_cols = [c for c in df.columns if c != "Zona"]
+        st.dataframe(
+            df[display_cols].style.apply(_highlight, axis=1),
+            use_container_width=True,
+            height=400,
+        )
+
+    if not df_no.empty:
+        with st.expander(
+            f"{section_label} bez merenja ({len(df_no)}) — potreban terenski pregled",
+            expanded=False,
+        ):
+            st.dataframe(df_no, use_container_width=True)
+
+
+def show_load() -> None:
+    st.subheader("Opterećenje F11 fidera")
+    _render_load_section(
+        df=load_f11(),
+        df_no=load_f11_no_reads(),
+        name_col="Feeder11",
+        section_label="F11 fidera",
+    )
+
+    st.divider()
+
+    st.subheader("Opterećenje F33 fidera")
+    _render_load_section(
+        df=load_f33(),
+        df_no=load_f33_no_reads(),
+        name_col="Feeder33",
+        section_label="F33 fidera",
+    )
