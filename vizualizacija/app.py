@@ -64,7 +64,8 @@ with st.sidebar:
     st.divider()
     st.subheader("Filteri")
 
-    f11_df = data["feeders11"]
+    f11_with_dt = set(data["distribution_substations"]["Feeder11Id"].dropna().astype(int))
+    f11_df = data["feeders11"][data["feeders11"]["Id"].isin(f11_with_dt)]
     if ss_ids:
         f11_df = f11_df[f11_df["SsId"].isin(ss_ids)]
     placeholder = f"Filtrirano ({len(f11_df)})..." if ss_ids else "Svi Feeders11"
