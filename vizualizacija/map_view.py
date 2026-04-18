@@ -28,7 +28,7 @@ def build_ts_ss_lines(data: dict) -> list:
             continue
         ts_row = ts.loc[int(ts_id)]
         ss_row = ss.loc[ss_id]
-        if pd.isna(ts_row["Latitude"]) or pd.isna(ss_row["Latitude"]):
+        if pd.isna(ts_row["Latitude"]) or pd.isna(ts_row["Longitude"]) or pd.isna(ss_row["Latitude"]) or pd.isna(ss_row["Longitude"]):
             continue
         lines.append(
             ([float(ts_row["Latitude"]), float(ts_row["Longitude"])],
@@ -57,7 +57,7 @@ def build_ss_dt_lines(data: dict, feeder11_filter=None, substation_filter=None) 
         if pd.isna(ss_id) or int(ss_id) not in ss.index:
             continue
         ss_row = ss.loc[int(ss_id)]
-        if pd.isna(dt_row["Latitude"]) or pd.isna(ss_row["Latitude"]):
+        if pd.isna(dt_row["Latitude"]) or pd.isna(dt_row["Longitude"]) or pd.isna(ss_row["Latitude"]) or pd.isna(ss_row["Longitude"]):
             continue
         lines.append(
             ([float(ss_row["Latitude"]), float(ss_row["Longitude"])],
@@ -77,7 +77,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
     ss_dt_group = folium.FeatureGroup(name="SS → DT veze", show=True)
 
     for _, row in data["transmission_stations"].iterrows():
-        if pd.isna(row["Latitude"]):
+        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
             continue
         folium.Marker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
@@ -86,7 +86,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
         ).add_to(ts_group)
 
     for _, row in data["substations"].iterrows():
-        if pd.isna(row["Latitude"]):
+        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
             continue
         folium.Marker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
@@ -103,7 +103,7 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
         dt_data = dt_data[dt_data["Feeder11Id"].isin(valid_ids)]
 
     for _, row in dt_data.iterrows():
-        if pd.isna(row["Latitude"]):
+        if pd.isna(row["Latitude"]) or pd.isna(row["Longitude"]):
             continue
         folium.CircleMarker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
