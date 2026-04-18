@@ -74,6 +74,9 @@ def load_no_reading_dts() -> pd.DataFrame:
     conn = get_connection()
     try:
         query = """
+        WITH meters_with_reads AS (
+            SELECT DISTINCT Mid FROM MeterReads WHERE Cid IN (6,7,8,9,10,11)
+        )
         SELECT
             d.Name                                   AS [DT Stanica],
             d.NameplateRating                        AS [Snaga (kVA)],
@@ -84,13 +87,10 @@ def load_no_reading_dts() -> pd.DataFrame:
                 ELSE 'Nema očitavanja V/I'
             END                                      AS [Razlog]
         FROM DistributionSubstation d
+        LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
         LEFT JOIN Feeders11  f11 ON f11.Id  = d.Feeder11Id
         LEFT JOIN Substations sub ON sub.Id = f11.SsId
-        WHERE d.MeterId IS NULL
-           OR d.MeterId NOT IN (
-               SELECT DISTINCT Mid FROM MeterReads
-               WHERE Cid IN (6,7,8,9,10,11)
-           )
+        WHERE d.MeterId IS NULL OR mwr.Mid IS NULL
         ORDER BY sub.Name, f11.Name, d.Name
         """
         return pd.read_sql(query, conn)
