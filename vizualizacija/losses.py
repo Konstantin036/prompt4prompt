@@ -1,6 +1,8 @@
+import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 from db import get_connection
+from theme import apply_dark_theme
 
 
 @st.cache_data
@@ -95,7 +97,6 @@ def load_losses() -> pd.DataFrame:
             GROUP BY f.SsId
         ),
         f33_ss_count AS (
-            -- Koliko SS svaki F33 hrani (da bi detektovali deljene fidere)
             SELECT Feeders33Id, COUNT(DISTINCT SubstationsId) AS ss_count
             FROM   Feeder33Substation
             GROUP BY Feeders33Id
@@ -168,7 +169,7 @@ def load_losses() -> pd.DataFrame:
         conn.close()
 
 
-_ANOMALY_THRESHOLD = 70  # % — iznad ovoga ili ispod 0 smatramo anomalijom
+_ANOMALY_THRESHOLD = 70
 
 
 def _split_anomalies(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -176,8 +177,117 @@ def _split_anomalies(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return df[~mask].reset_index(drop=True), df[mask].reset_index(drop=True)
 
 
+def _loss_color_point(pct: float) -> str:
+    if pct > 20:
+        return "#e53e3e"
+    if pct > 10:
+        return "#FF8C00"
+    if pct > 5:
+        return "#ECC94B"
+    return "#1db954"
+
+
+def _scatter_losses(df: pd.DataFrame, mwh_col: str, label_col: str, title: str) -> None:
+    max_loss = max(df["Gubici (%)"].max() * 1.15, 25)
+
+    fig = go.Figure()
+
+    # Reference lines
+    for y, color, name in [
+        (5,  "rgba(29,185,84,0.45)",  "5% prag"),
+        (10, "rgba(255,140,0,0.45)",  "10% prag"),
+        (20, "rgba(229,62,62,0.45)",  "20% prag"),
+    ]:
+        fig.add_hline(
+            y=y,
+            line=dict(color=color, width=1.5, dash="dot"),
+            annotation_text=f" {y}%",
+            annotation_font=dict(color=color, size=10),
+            annotation_position="right",
+        )
+
+    # Bubble size scaled to MWh
+    mwh = df[mwh_col].fillna(0)
+    max_mwh = mwh.max() if mwh.max() > 0 else 1
+    sizes = (mwh / max_mwh * 35 + 8).clip(8, 45)
+    colors = df["Gubici (%)"].apply(_loss_color_point)
+
+    fig.add_trace(go.Scatter(
+        x=df["Pokr. (%)"],
+        y=df["Gubici (%)"],
+        mode="markers+text",
+        text=df[label_col],
+        textposition="top center",
+        textfont=dict(size=9, color="#718096"),
+        marker=dict(
+            size=sizes,
+            color=colors,
+            line=dict(color="rgba(255,255,255,0.2)", width=1),
+            opacity=0.88,
+        ),
+        hovertemplate=(
+            "<b>%{text}</b><br>"
+            "Pokrivenost merenja: <b>%{x:.0f}%</b><br>"
+            "Gubici: <b>%{y:.2f}%</b><br>"
+            "<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+
+    # Invisible legend markers for loss zones
+    for label, color in [
+        ("≤ 5% — prihvatljivo", "#1db954"),
+        ("5–10% — povišeno",    "#ECC94B"),
+        ("10–20% — kritično",   "#FF8C00"),
+        ("> 20% — alarm",       "#e53e3e"),
+    ]:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(size=10, color=color),
+            name=label,
+        ))
+
+    apply_dark_theme(fig)
+    fig.update_layout(
+        title=title,
+        xaxis_title="Pokrivenost merenja (%) — pouzdanost podataka",
+        yaxis_title="Gubici energije (%)",
+        xaxis=dict(range=[-5, 105]),
+        yaxis=dict(range=[-1, max_loss]),
+        height=480,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _styled_table(df: pd.DataFrame, coverage_col: str = "Pokr. (%)") -> None:
+    def highlight_row(row):
+        styles = [""] * len(row)
+        pct = row.get("Gubici (%)", 0)
+        pokr = row.get(coverage_col, 100)
+        deli = row.get("F33 deli SS", 1)
+        loss_col = df.columns.get_loc("Gubici (%)")
+        if pokr < 100 or deli > 1:
+            styles[loss_col] = "background-color: #2d2d00; color: #ECC94B"
+        elif pct > 20:
+            styles[loss_col] = "background-color: #3d0a0a; color: #e53e3e"
+        elif pct > 10:
+            styles[loss_col] = "background-color: #2d1500; color: #FF8C00"
+        elif pct > 5:
+            styles[loss_col] = "background-color: #2d2000; color: #ECC94B"
+        return styles
+
+    st.dataframe(df.style.apply(highlight_row, axis=1), use_container_width=True, height=420)
+
+
 def show_losses() -> None:
-    st.subheader("Analiza gubitaka po podstanicama (SS)")
+    # ── SS nivo ───────────────────────────────────────────────────────────────
+    st.markdown(
+        '<h3 style="color:#FF6B35;font-size:1.15rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem;">'
+        '📉 Gubici po podstanicama (SS)</h3>',
+        unsafe_allow_html=True,
+    )
 
     df = load_losses()
 
@@ -190,52 +300,60 @@ def show_losses() -> None:
     col1, col2, col3 = st.columns(3)
     col1.metric("SS u analizi", len(df_normal))
     col2.metric("Ukupni gubici (MWh)", f"{df_normal['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici (%)", f"{df_normal['Gubici (%)'].mean():.1f}%")
+    col3.metric("Prosječni gubici", f"{df_normal['Gubici (%)'].mean():.1f}%")
 
-    def highlight_row(row):
-        styles = [""] * len(row)
-        pct = row.get("Gubici (%)", 0)
-        pokr = row.get("Pokr. (%)", 100)
-        deli = row.get("F33 deli SS", 1)
-        loss_col = df_normal.columns.get_loc("Gubici (%)")
-        if pokr < 100 or deli > 1:
-            styles[loss_col] = "background-color: #4a4a00; color: white"
-        elif pct > 20:
-            styles[loss_col] = "background-color: #8b0000; color: white"
-        elif pct > 10:
-            styles[loss_col] = "background-color: #cc4400; color: white"
-        elif pct > 5:
-            styles[loss_col] = "background-color: #997700; color: white"
-        return styles
-
-    st.dataframe(df_normal.style.apply(highlight_row, axis=1), use_container_width=True, height=500)
-    st.caption(
-        "Boje kolone Gubici (%): "
-        "🟨 nepouzdani (nepotpuna merila ili deljeni F33) | "
-        "🟥 >20% | 🟧 >10% | 🟨 >5%"
+    _scatter_losses(
+        df_normal,
+        mwh_col="F33 (MWh)",
+        label_col="Podstanica (SS)",
+        title="Pouzdanost mjerenja vs. Gubici energije — nivo SS",
     )
 
+    st.caption(
+        "Svaka tačka = jedna podstanica. "
+        "Veličina = F33 energija (MWh). "
+        "X-osa: pokrivenost merenja (viša = pouzdaniji podaci). "
+        "Y-osa: gubici (tačke gore-desno su potvrđene problematične SS)."
+    )
+
+    with st.expander(f"Tabela — {len(df_normal)} podstanica", expanded=False):
+        _styled_table(df_normal)
+        st.caption(
+            "Boje: 🟨 nepouzdani podaci (nepotpuna merila / deljeni F33) "
+            "| 🟥 >20% | 🟧 >10% | 🟡 >5%"
+        )
+
     if not df_anom.empty:
-        with st.expander(f"Anomalije SS ({len(df_anom)} redova — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)", expanded=False):
+        with st.expander(
+            f"⚠️ Anomalije ({len(df_anom)} SS — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)",
+            expanded=False,
+        ):
             st.caption(
-                "Ovi redovi imaju nerealne vrednosti gubitaka. "
-                "Uzroci: neusklađena kumulativna merila, deljeni F33 fideri, nepotpuno merenje."
+                "Nerealne vrednosti — neusklađena kumulativna merila, deljeni F33, nepotpuno merenje."
             )
 
             def highlight_anom(row):
                 styles = [""] * len(row)
                 loss_col = df_anom.columns.get_loc("Gubici (%)")
                 pct = row.get("Gubici (%)", 0)
-                if pct < 0:
-                    styles[loss_col] = "background-color: #1a1a6e; color: white"
-                else:
-                    styles[loss_col] = "background-color: #8b0000; color: white"
+                styles[loss_col] = (
+                    "background-color: #1a1a6e; color: #90cdf4"
+                    if pct < 0
+                    else "background-color: #3d0a0a; color: #e53e3e"
+                )
                 return styles
 
             st.dataframe(df_anom.style.apply(highlight_anom, axis=1), use_container_width=True)
 
     st.divider()
-    st.subheader("Analiza gubitaka po Feeder11 fiderima")
+
+    # ── F11 nivo ──────────────────────────────────────────────────────────────
+    st.markdown(
+        '<h3 style="color:#FF6B35;font-size:1.15rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem;">'
+        '📉 Gubici po Feeder11 fiderima</h3>',
+        unsafe_allow_html=True,
+    )
 
     df11 = load_f11_losses()
 
@@ -248,33 +366,46 @@ def show_losses() -> None:
     col1, col2, col3 = st.columns(3)
     col1.metric("F11 fidera u analizi", len(df11_normal))
     col2.metric("Ukupni gubici F11 (MWh)", f"{df11_normal['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici F11 (%)", f"{df11_normal['Gubici (%)'].mean():.1f}%")
+    col3.metric("Prosječni gubici F11", f"{df11_normal['Gubici (%)'].mean():.1f}%")
 
-    def highlight_f11(row):
-        styles = [""] * len(row)
-        pct = row.get("Gubici (%)", 0)
-        pokr = row.get("Pokr. (%)", 100)
-        loss_col = df11_normal.columns.get_loc("Gubici (%)")
-        if pokr < 100:
-            styles[loss_col] = "background-color: #4a4a00; color: white"
-        elif pct > 20:
-            styles[loss_col] = "background-color: #8b0000; color: white"
-        elif pct > 10:
-            styles[loss_col] = "background-color: #cc4400; color: white"
-        elif pct > 5:
-            styles[loss_col] = "background-color: #997700; color: white"
-        return styles
-
-    st.dataframe(df11_normal.style.apply(highlight_f11, axis=1), use_container_width=True, height=500)
-    st.caption(
-        "Gubici F11 = F11 energija − Zbir DT merila na tom fideru. "
-        "Boje: 🟨 nepotpuna DT merila | 🟥 >20% | 🟧 >10% | 🟨 >5%"
+    _scatter_losses(
+        df11_normal,
+        mwh_col="F11 (MWh)",
+        label_col="Feeder11",
+        title="Pouzdanost mjerenja vs. Gubici energije — nivo F11",
     )
 
+    st.caption(
+        "Svaka tačka = jedan F11 fider. "
+        "Veličina = F11 energija (MWh). "
+        "Tačke gore-desno (visoka pokrivenost + visoki gubici) = prioritet za terensku inspekciju."
+    )
+
+    with st.expander(f"Tabela — {len(df11_normal)} F11 fidera", expanded=False):
+
+        def highlight_f11(row):
+            styles = [""] * len(row)
+            pct = row.get("Gubici (%)", 0)
+            pokr = row.get("Pokr. (%)", 100)
+            loss_col = df11_normal.columns.get_loc("Gubici (%)")
+            if pokr < 100:
+                styles[loss_col] = "background-color: #2d2d00; color: #ECC94B"
+            elif pct > 20:
+                styles[loss_col] = "background-color: #3d0a0a; color: #e53e3e"
+            elif pct > 10:
+                styles[loss_col] = "background-color: #2d1500; color: #FF8C00"
+            elif pct > 5:
+                styles[loss_col] = "background-color: #2d2000; color: #ECC94B"
+            return styles
+
+        st.dataframe(df11_normal.style.apply(highlight_f11, axis=1), use_container_width=True, height=420)
+
     if not df11_anom.empty:
-        with st.expander(f"Anomalije F11 ({len(df11_anom)} redova — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)", expanded=False):
+        with st.expander(
+            f"⚠️ Anomalije F11 ({len(df11_anom)} fidera — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)",
+            expanded=False,
+        ):
             st.caption(
-                "Ovi redovi imaju nerealne vrednosti gubitaka. "
                 "Uzroci: neusklađena kumulativna merila (F11 meter stariji od DT merila), nepotpuno DT merenje."
             )
 
@@ -282,10 +413,11 @@ def show_losses() -> None:
                 styles = [""] * len(row)
                 loss_col = df11_anom.columns.get_loc("Gubici (%)")
                 pct = row.get("Gubici (%)", 0)
-                if pct < 0:
-                    styles[loss_col] = "background-color: #1a1a6e; color: white"
-                else:
-                    styles[loss_col] = "background-color: #8b0000; color: white"
+                styles[loss_col] = (
+                    "background-color: #1a1a6e; color: #90cdf4"
+                    if pct < 0
+                    else "background-color: #3d0a0a; color: #e53e3e"
+                )
                 return styles
 
             st.dataframe(df11_anom.style.apply(highlight_f11_anom, axis=1), use_container_width=True)

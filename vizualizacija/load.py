@@ -1,13 +1,10 @@
-# vizualizacija/load.py
+import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 from db import get_connection
+from theme import ZONE_COLORS_CHART, ZONE_COLORS_TABLE, apply_dark_theme
 
-_ZONE_COLORS = {
-    "Normalno":   "#2d6a2d",
-    "Upozorenje": "#997700",
-    "Kritično":   "#8b0000",
-}
+_ZONE_COLORS = ZONE_COLORS_TABLE
 
 
 def _color_load(pct: float) -> str:
@@ -271,6 +268,123 @@ def load_f33_no_reads() -> pd.DataFrame:
         conn.close()
 
 
+def _capacity_scatter(df: pd.DataFrame, name_col: str, section_label: str) -> None:
+    """Scatter: X = S nominalno, Y = S mereno, diagonal threshold lines."""
+    df = df.copy()
+    df["Zona"] = df["Opterećenje (%)"].apply(_color_load)
+
+    max_nom = df["S nominalno (kVA)"].max()
+    x_ref = [0, max_nom * 1.05]
+
+    fig = go.Figure()
+
+    # Zone shading (fill between diagonal lines)
+    fig.add_trace(go.Scatter(
+        x=x_ref + x_ref[::-1],
+        y=[0, max_nom * 1.05 * 0.70] + [max_nom * 1.05 * 0.85, 0],
+        fill="toself",
+        fillcolor="rgba(29,185,84,0.06)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=x_ref + x_ref[::-1],
+        y=[0, max_nom * 1.05 * 0.85] + [max_nom * 1.05 * 1.0, 0],
+        fill="toself",
+        fillcolor="rgba(255,140,0,0.06)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=x_ref + [x_ref[-1], x_ref[-1]],
+        y=[0, max_nom * 1.05 * 1.0] + [max_nom * 1.05 * 1.3, 0],
+        fill="toself",
+        fillcolor="rgba(229,62,62,0.06)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+
+    # Threshold diagonal lines
+    for factor, color, dash, label in [
+        (0.70, "rgba(29,185,84,0.55)",  "dot",    "70% — normalno/upozorenje"),
+        (0.85, "rgba(255,140,0,0.55)",  "dot",    "85% — upozorenje/kritično"),
+        (1.00, "rgba(229,62,62,0.55)",  "dashdot","100% — nominalni kapacitet"),
+    ]:
+        fig.add_trace(go.Scatter(
+            x=x_ref,
+            y=[v * factor for v in x_ref],
+            mode="lines",
+            line=dict(color=color, width=1.5, dash=dash),
+            name=label,
+        ))
+
+    # Data points per zone
+    marker_size_col = "DT merila"
+    for zone in ["Normalno", "Upozorenje", "Kritično"]:
+        sub = df[df["Zona"] == zone]
+        if sub.empty:
+            continue
+        sizes = (sub[marker_size_col].clip(1, 50) / df[marker_size_col].max() * 22 + 9)
+        fig.add_trace(go.Scatter(
+            x=sub["S nominalno (kVA)"],
+            y=sub["S mereno (kVA)"],
+            mode="markers",
+            name=zone,
+            marker=dict(
+                size=sizes,
+                color=ZONE_COLORS_CHART[zone],
+                line=dict(color="rgba(255,255,255,0.25)", width=1),
+                opacity=0.9,
+            ),
+            text=sub[name_col],
+            customdata=sub[["Opterećenje (%)", "DT merila", "DT ukupno", "Pokr. (%)"]].values,
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "S nominalno: <b>%{x:,.0f} kVA</b><br>"
+                "S mereno: <b>%{y:,.0f} kVA</b><br>"
+                "Opterećenje: <b>%{customdata[0]:.1f}%</b><br>"
+                "DT merila / ukupno: %{customdata[1]} / %{customdata[2]}<br>"
+                "Pokrivenost: %{customdata[3]:.0f}%<br>"
+                "<extra></extra>"
+            ),
+        ))
+
+    apply_dark_theme(fig)
+    fig.update_layout(
+        title=f"Instalisani kapacitet vs. Trenutno opterećenje — {section_label}",
+        xaxis_title="S nominalno (kVA) — instalisani kapacitet transformatora",
+        yaxis_title="S mereno (kVA) — izmjereno opterećenje",
+        height=520,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "Svaka tačka = jedan fider. Veličina tačke = broj DT stanica sa merenjima. "
+        "Tačke iznad crvene linije = preopterećen fider. "
+        "Zelena zona ≤ 70% | Žuta 70–85% | Crvena > 85%."
+    )
+
+
+def _styled_load_table(df: pd.DataFrame) -> None:
+    def _highlight(row):
+        styles = [""] * len(row)
+        idx = df.columns.get_loc("Opterećenje (%)")
+        zone = _color_load(row["Opterećenje (%)"])
+        color = _ZONE_COLORS[zone]
+        styles[idx] = f"background-color: {color}; color: white"
+        return styles
+
+    display_cols = [c for c in df.columns if c != "Zona"]
+    st.dataframe(
+        df[display_cols].style.apply(_highlight, axis=1),
+        use_container_width=True,
+        height=380,
+    )
+
+
 def _render_load_section(
     df: pd.DataFrame,
     df_no: pd.DataFrame,
@@ -290,59 +404,30 @@ def _render_load_section(
             int((df["Zona"] == "Kritično").sum()),
         )
         col3.metric(
-            "Prosečno opterećenje",
+            "Prosječno opterećenje",
             f"{df['Opterećenje (%)'].mean():.1f}%",
         )
 
-        import plotly.express as px
+        _capacity_scatter(df, name_col, section_label)
 
-        fig = px.bar(
-            df.sort_values("Opterećenje (%)"),
-            x="Opterećenje (%)",
-            y=name_col,
-            orientation="h",
-            color="Zona",
-            color_discrete_map=_ZONE_COLORS,
-            category_orders={"Zona": ["Normalno", "Upozorenje", "Kritično"]},
-            hover_data={
-                col: True
-                for col in df.columns
-                if col not in (name_col, "Zona")
-            },
-            height=max(400, len(df) * 22),
-        )
-        fig.update_layout(
-            xaxis={"range": [0, max(df["Opterećenje (%)"].max() * 1.1, 100)]},
-            yaxis={"categoryorder": "total ascending"},
-            margin={"l": 10, "r": 10, "t": 30, "b": 10},
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        def _highlight(row):
-            styles = [""] * len(row)
-            idx = df.columns.get_loc("Opterećenje (%)")
-            zone = _color_load(row["Opterećenje (%)"])
-            color = _ZONE_COLORS[zone]
-            styles[idx] = f"background-color: {color}; color: white"
-            return styles
-
-        display_cols = [c for c in df.columns if c != "Zona"]
-        st.dataframe(
-            df[display_cols].style.apply(_highlight, axis=1),
-            use_container_width=True,
-            height=400,
-        )
+        with st.expander(f"Tabela — {len(df)} {section_label}", expanded=False):
+            _styled_load_table(df)
 
     if not df_no.empty:
         with st.expander(
-            f"{section_label} bez merenja ({len(df_no)}) — potreban terenski pregled",
+            f"⚠️ {section_label} bez merenja ({len(df_no)}) — potreban terenski pregled",
             expanded=False,
         ):
             st.dataframe(df_no, use_container_width=True)
 
 
 def show_load() -> None:
-    st.subheader("Opterećenje F11 fidera")
+    st.markdown(
+        '<h3 style="color:#FF6B35;font-size:1.15rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem;">'
+        '⚡ Opterećenje F11 fidera</h3>',
+        unsafe_allow_html=True,
+    )
     _render_load_section(
         df=load_f11(),
         df_no=load_f11_no_reads(),
@@ -352,7 +437,12 @@ def show_load() -> None:
 
     st.divider()
 
-    st.subheader("Opterećenje F33 fidera")
+    st.markdown(
+        '<h3 style="color:#FF6B35;font-size:1.15rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem;">'
+        '⚡ Opterećenje F33 fidera</h3>',
+        unsafe_allow_html=True,
+    )
     _render_load_section(
         df=load_f33(),
         df_no=load_f33_no_reads(),

@@ -1,6 +1,8 @@
+import plotly.express as px
 import pandas as pd
 import streamlit as st
 from db import get_connection
+from theme import apply_dark_theme
 
 
 @st.cache_data
@@ -113,7 +115,12 @@ def _aggregate_by_feeder(df: pd.DataFrame, kva_per_consumer: float) -> pd.DataFr
 
 
 def show_consumers() -> None:
-    st.subheader("Estimacija broja potrošača po F11 fiderima")
+    st.markdown(
+        '<h3 style="color:#FF6B35;font-size:1.15rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:1rem;">'
+        '👥 Estimacija broja potrošača po F11 fiderima</h3>',
+        unsafe_allow_html=True,
+    )
 
     df = load_consumer_estimates()
 
@@ -135,28 +142,52 @@ def show_consumers() -> None:
     col2.metric("DT stanica sa merenjima", len(df))
     col3.metric("Ukupno est. potrošača", f"{f11_agg['consumers'].sum():,}")
 
-    import plotly.express as px
-
-    fig = px.bar(
+    # Treemap — hijerarhija: mreža → TS → SS → F11 fider
+    fig = px.treemap(
         f11_agg,
-        x="consumers",
-        y="Feeder11",
-        orientation="h",
-        color="Podstanica (SS)",
-        hover_data={"TS": True, "S_kVA": ":.1f", "DT_count": True},
+        path=[px.Constant("🌐 Mreža"), "TS", "Podstanica (SS)", "Feeder11"],
+        values="consumers",
+        color="S_kVA",
+        color_continuous_scale=["#1a2040", "#FF6B35", "#ffb347"],
+        color_continuous_midpoint=f11_agg["S_kVA"].median(),
+        custom_data=["S_kVA", "DT_count", "consumers"],
         labels={
-            "consumers": "Estimirani broj potrošača",
-            "Feeder11": "Feeder11",
+            "consumers": "Potrošači",
             "S_kVA": "S ukupno (kVA)",
             "DT_count": "Broj DT",
         },
-        height=max(400, len(f11_agg) * 22),
+        height=600,
     )
+    fig.update_traces(
+        texttemplate="<b>%{label}</b><br>%{customdata[2]} potrošača",
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Potrošači: <b>%{customdata[2]}</b><br>"
+            "S ukupno: %{customdata[0]:.1f} kVA<br>"
+            "DT stanica: %{customdata[1]}<br>"
+            "<extra></extra>"
+        ),
+        marker=dict(
+            line=dict(width=2, color="#0f0f1a"),
+            cornerradius=6,
+        ),
+        textfont=dict(size=12),
+    )
+    apply_dark_theme(fig)
     fig.update_layout(
-        yaxis={"categoryorder": "total ascending"},
-        margin={"l": 10, "r": 10, "t": 30, "b": 10},
+        title="Distribucija potrošača — hijerarhija TS → SS → F11",
+        coloraxis_colorbar=dict(
+            title="S (kVA)",
+            tickfont=dict(color="#a0aec0"),
+            titlefont=dict(color="#8892b0"),
+        ),
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "Veličina kvadrata = broj procijenjenih potrošača. "
+        "Boja = ukupna izmjerena snaga (kVA) — toplije = veće opterećenje."
+    )
 
     with st.expander("Detalji po DT stanicama"):
         st.dataframe(
