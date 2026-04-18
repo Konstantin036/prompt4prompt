@@ -20,7 +20,6 @@ with st.sidebar:
         st.rerun()
 
     data = load_data()
-    show_stats(data)
 
     st.divider()
     st.subheader("Vidljivost slojeva")
@@ -77,20 +76,15 @@ with st.sidebar:
         st.selectbox("Feeder11", list(feeder11_options.keys()))
     ]
 
-    ss_options = {"Sve Substations": None} | {
-        f"{row['Name']} (Id: {row['Id']})": int(row["Id"])
-        for _, row in data["substations"].iterrows()
-    }
-    substation_filter = ss_options[
-        st.selectbox("Substation (filter DT)", list(ss_options.keys()))
-    ]
+    st.divider()
+    show_stats(data, ts_ids=ts_ids, ss_ids=ss_ids, feeder11_filter=feeder11_filter)
 
 # --- Mapa ---
 st.subheader("Mapa mreže")
 m = create_map(
     data,
     feeder11_filter=feeder11_filter,
-    substation_filter=substation_filter,
+    substation_filter=None,
     ts_ids=ts_ids,
     ss_ids=ss_ids,
 )
