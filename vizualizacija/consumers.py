@@ -110,3 +110,69 @@ def _aggregate_by_feeder(df: pd.DataFrame, kva_per_consumer: float) -> pd.DataFr
     )
     agg["consumers"] = (agg["S_kVA"] / kva_per_consumer).round(0).astype(int)
     return agg.sort_values("consumers", ascending=False).reset_index(drop=True)
+
+
+def show_consumers() -> None:
+    st.subheader("Estimacija broja potrošača po F11 fiderima")
+
+    df = load_consumer_estimates()
+
+    if df.empty:
+        st.warning("Nema mernih podataka (V/I) za estimaciju potrošača.")
+        _show_no_readings()
+        return
+
+    kva_per_consumer = st.slider(
+        "kVA po potrošaču",
+        min_value=0.5, max_value=5.0, value=1.5, step=0.1,
+        help="Prosečna vršna prividna snaga po potrošaču u kVA",
+    )
+
+    f11_agg = _aggregate_by_feeder(df, kva_per_consumer)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("F11 fidera sa merenjima", len(f11_agg))
+    col2.metric("DT stanica sa merenjima", len(df))
+    col3.metric("Ukupno est. potrošača", f"{f11_agg['consumers'].sum():,}")
+
+    import plotly.express as px
+
+    fig = px.bar(
+        f11_agg,
+        x="consumers",
+        y="Feeder11",
+        orientation="h",
+        color="Podstanica (SS)",
+        hover_data={"TS": True, "S_kVA": ":.1f", "DT_count": True},
+        labels={
+            "consumers": "Estimirani broj potrošača",
+            "Feeder11": "Feeder11",
+            "S_kVA": "S ukupno (kVA)",
+            "DT_count": "Broj DT",
+        },
+        height=max(400, len(f11_agg) * 22),
+    )
+    fig.update_layout(
+        yaxis={"categoryorder": "total ascending"},
+        margin={"l": 10, "r": 10, "t": 30, "b": 10},
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Detalji po DT stanicama"):
+        st.dataframe(
+            df[["TS", "Podstanica (SS)", "Feeder11", "DT Stanica",
+                "Snaga (kVA)", "S (kVA)", "Poslednje merenje"]],
+            use_container_width=True,
+            height=400,
+        )
+
+    st.divider()
+    _show_no_readings()
+
+
+def _show_no_readings() -> None:
+    df_no = load_no_reading_dts()
+    st.warning(
+        f"**{len(df_no)} stanica bez merenja** — potrebno izvršiti pregled na terenu."
+    )
+    st.dataframe(df_no, use_container_width=True, height=350)
