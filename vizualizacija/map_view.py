@@ -65,6 +65,67 @@ def build_ts_ss_lines(data: dict, ss_id_filter=None) -> list:
     return lines
 
 
+def _nearest_neighbor_chain(start: list, points: list) -> list:
+    """Greedy nearest-neighbor path starting from start through all points."""
+    remaining = [list(p) for p in points]
+    ordered = []
+    current = start
+    while remaining:
+        idx = min(range(len(remaining)),
+                  key=lambda i: (remaining[i][0] - current[0])**2 + (remaining[i][1] - current[1])**2)
+        nearest = remaining.pop(idx)
+        ordered.append(nearest)
+        current = nearest
+    return ordered
+
+
+def build_ss_dt_chains(data: dict, feeder11_filter=None, substation_filter=None,
+                       ss_ids=None) -> list:
+    """
+    Returns list of (chain, ss_id) where chain is [ss_coords, dt1, dt2, ...]
+    ordered by nearest-neighbor from the SS outward.
+    """
+    ss = data["substations"].set_index("Id")
+    f11 = data["feeders11"].set_index("Id")
+    dt = data["distribution_substations"].copy()
+
+    if feeder11_filter is not None:
+        dt = dt[dt["Feeder11Id"] == feeder11_filter]
+    if substation_filter is not None:
+        valid_ids = f11[f11["SsId"] == substation_filter].index.tolist()
+        dt = dt[dt["Feeder11Id"].isin(valid_ids)]
+    if ss_ids:
+        visible_f11_ids = f11[f11["SsId"].isin(ss_ids)].index.tolist()
+        dt = dt[dt["Feeder11Id"].isin(visible_f11_ids)]
+
+    # Grupiši DT po SS-u
+    ss_to_dts: dict[int, list] = {}
+    for _, dt_row in dt.iterrows():
+        f11_id = dt_row["Feeder11Id"]
+        if pd.isna(f11_id) or int(f11_id) not in f11.index:
+            continue
+        ss_id = f11.loc[int(f11_id), "SsId"]
+        if pd.isna(ss_id) or int(ss_id) not in ss.index:
+            continue
+        if not _valid_coords(dt_row["Latitude"], dt_row["Longitude"]):
+            continue
+        ss_id_int = int(ss_id)
+        ss_to_dts.setdefault(ss_id_int, []).append(
+            [float(dt_row["Latitude"]), float(dt_row["Longitude"])]
+        )
+
+    chains = []
+    for ss_id_int, dt_points in ss_to_dts.items():
+        ss_row = ss.loc[ss_id_int]
+        if not _valid_coords(ss_row["Latitude"], ss_row["Longitude"]):
+            continue
+        ss_point = [float(ss_row["Latitude"]), float(ss_row["Longitude"])]
+        ordered = _nearest_neighbor_chain(ss_point, dt_points)
+        chains.append(([ss_point] + ordered, ss_id_int))
+
+    return chains
+
+
 def build_ss_dt_lines(data: dict, feeder11_filter=None, substation_filter=None) -> list:
     ss = data["substations"].set_index("Id")
     f11 = data["feeders11"].set_index("Id")
@@ -188,8 +249,9 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None,
     for ts_coords, ss_coords in build_ts_ss_lines(data, ss_id_filter=ss_id_for_ts_filter):
         folium.PolyLine([ts_coords, ss_coords], color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
 
-    for ss_coords, dt_coords in build_ss_dt_lines(data, feeder11_filter, substation_filter):
-        folium.PolyLine([ss_coords, dt_coords], color="green", weight=1.5, opacity=0.6).add_to(ss_dt_group)
+    for chain, chain_ss_id in build_ss_dt_chains(data, feeder11_filter, substation_filter, ss_ids):
+        color = ss_color_map.get(chain_ss_id, "#4daf4a")
+        folium.PolyLine(chain, color=color, weight=1.5, opacity=0.7).add_to(ss_dt_group)
 
     for group in (ts_group, ss_group, dt_group, dt_no_conn_group, ts_ss_group, ss_dt_group):
         group.add_to(m)

@@ -1,6 +1,7 @@
 import pandas as pd
 import folium
-from vizualizacija.map_view import get_map_center, build_ts_ss_lines, build_ss_dt_lines, create_map, _valid_coords
+from vizualizacija.map_view import (get_map_center, build_ts_ss_lines, build_ss_dt_lines,
+                                    build_ss_dt_chains, _nearest_neighbor_chain, create_map, _valid_coords)
 
 
 def _make_data():
@@ -75,6 +76,26 @@ def test_get_map_center_ignores_null_island():
     ], ignore_index=True)
     center = get_map_center(data)
     assert abs(center[0] - 44.1) < 0.5
+
+
+def test_nearest_neighbor_chain_ordering():
+    start = [0.0, 0.0]
+    points = [[0.0, 2.0], [0.0, 1.0], [0.0, 3.0]]
+    result = _nearest_neighbor_chain(start, points)
+    # treba da bude [1, 2, 3] redosled (svaki put bira najbliži)
+    assert result == [[0.0, 1.0], [0.0, 2.0], [0.0, 3.0]]
+
+
+def test_build_ss_dt_chains_returns_chain_starting_at_ss():
+    data = _make_data()
+    chains = build_ss_dt_chains(data)
+    assert len(chains) == 1
+    chain, ss_id = chains[0]
+    # Chain počinje na SS koordinatama
+    assert chain[0] == [44.1, 21.1]
+    # Chain ima SS + DT = 2 tačke
+    assert len(chain) == 2
+    assert ss_id == 10
 
 
 def test_build_ts_ss_lines_with_ss_filter():
