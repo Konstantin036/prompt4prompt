@@ -25,6 +25,10 @@ with st.sidebar:
     st.divider()
     st.subheader("Vidljivost slojeva")
 
+    ts_name_to_id = dict(zip(
+        data["transmission_stations"]["Name"],
+        data["transmission_stations"]["Id"].astype(int),
+    ))
     ts_names = data["transmission_stations"]["Name"].dropna().tolist()
     selected_ts_names = st.multiselect(
         "Transmission Stations (110kV+)",
@@ -32,23 +36,29 @@ with st.sidebar:
         default=[],
         placeholder="Prikaži sve...",
     )
-    ts_name_to_id = dict(zip(
-        data["transmission_stations"]["Name"],
-        data["transmission_stations"]["Id"].astype(int),
-    ))
     ts_ids = [ts_name_to_id[n] for n in selected_ts_names] or None
 
-    ss_names = data["substations"]["Name"].dropna().tolist()
+    # Kada su TS izabrani, prikaži samo SS koje su vezane za te TS
+    if ts_ids:
+        f33 = data["feeders33"]
+        f33_ss = data["feeder33_substation"]
+        linked_f33 = f33[f33["TsId"].isin(ts_ids)]["Id"].tolist()
+        linked_ss_ids = f33_ss[f33_ss["Feeders33Id"].isin(linked_f33)]["SubstationsId"].tolist()
+        ss_options_df = data["substations"][data["substations"]["Id"].isin(linked_ss_ids)]
+    else:
+        ss_options_df = data["substations"]
+
+    ss_name_to_id = dict(zip(
+        ss_options_df["Name"],
+        ss_options_df["Id"].astype(int),
+    ))
+    ss_names_filtered = ss_options_df["Name"].dropna().tolist()
     selected_ss_names = st.multiselect(
         "Substations (33kV)",
-        options=ss_names,
+        options=ss_names_filtered,
         default=[],
-        placeholder="Prikaži sve...",
+        placeholder="Prikaži sve..." if not ts_ids else f"Filtrirano ({len(ss_names_filtered)})...",
     )
-    ss_name_to_id = dict(zip(
-        data["substations"]["Name"],
-        data["substations"]["Id"].astype(int),
-    ))
     ss_ids = [ss_name_to_id[n] for n in selected_ss_names] or None
 
     st.divider()
