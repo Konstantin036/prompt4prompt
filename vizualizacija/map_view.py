@@ -23,12 +23,20 @@ def _valid_coords(lat, lon) -> bool:
     if pd.isna(lat) or pd.isna(lon):
         return False
     lat, lon = float(lat), float(lon)
-    # Odbaci (0, 0) — "null island" u Atlantiku
-    if abs(lat) < 0.5 and abs(lon) < 0.5:
+    # Bounding box Nigerije: lat 4–14°N, lon 2–15°E
+    # Sve izvan toga su ili placeholder ili zamijenjeni lat/lon
+    if not (4.0 <= lat <= 14.0 and 2.0 <= lon <= 15.0):
         return False
-    # Odbaci placeholder (9.0, 7.0) — lažne koordinate za TS bez GPS podataka
-    # (BIDA, LOKOJA, MINNA, OKENE, AJAOKUTA, SHIRORO, AT8, TEGINA, LAFIA)
+    # Odbaci placeholder (9.0, 7.0) — TS bez GPS podataka
+    # (BIDA, LOKOJA, MINNA, OKENE, AJAOKUTA, SHIRORO, AT8, TEGINA, LAFIA, MAIN J...)
     if abs(lat - 9.0) < 0.015 and abs(lon - 7.0) < 0.015:
+        return False
+    # Odbaci round-number placeholdere (npr. 6.0, 6.0)
+    if lat == int(lat) and lon == int(lon) and lat < 8.0:
+        return False
+    # Odbaci zamijenjene Abuja koordinate: lat u lon-opsegu (6.9–7.8), lon u lat-opsegu (8.8–9.4)
+    # Pravi primjer: White House dt (7.48, 9.07) umjesto (9.07, 7.48)
+    if 6.9 <= lat <= 7.8 and 8.8 <= lon <= 9.4:
         return False
     return True
 
