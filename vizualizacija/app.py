@@ -4,6 +4,7 @@ from streamlit_folium import st_folium
 from db import load_data
 from losses import show_losses
 from consumers import show_consumers
+from load import show_load
 from map_view import create_map
 from stats import show_stats
 
@@ -97,6 +98,9 @@ show_losses()
 
 # --- Estimacija potrošača ---
 show_consumers()
+
+# --- Opterećenje fidera ---
+show_load()
 
 # --- Tabele ---
 st.subheader("Podaci iz baze")
