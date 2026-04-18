@@ -22,8 +22,13 @@ def _build_f11_color_map(data: dict) -> dict:
 def _valid_coords(lat, lon) -> bool:
     if pd.isna(lat) or pd.isna(lon):
         return False
-    # Odbaci koordinate bliske (0, 0) — "null island" u Atlantiku
-    if abs(float(lat)) < 0.5 and abs(float(lon)) < 0.5:
+    lat, lon = float(lat), float(lon)
+    # Odbaci (0, 0) — "null island" u Atlantiku
+    if abs(lat) < 0.5 and abs(lon) < 0.5:
+        return False
+    # Odbaci placeholder (9.0, 7.0) — lažne koordinate za TS bez GPS podataka
+    # (BIDA, LOKOJA, MINNA, OKENE, AJAOKUTA, SHIRORO, AT8, TEGINA, LAFIA)
+    if abs(lat - 9.0) < 0.015 and abs(lon - 7.0) < 0.015:
         return False
     return True
 
