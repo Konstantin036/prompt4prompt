@@ -9,71 +9,55 @@ def load_losses() -> pd.DataFrame:
     try:
         query = """
         WITH latest_f33 AS (
-            SELECT f.Id       AS f33_id,
-                   f.Name     AS f33_name,
-                   t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh,
-                   t.Ts
+            SELECT f.Id   AS f33_id,
+                   f.Name AS f33_name,
+                   t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh
             FROM   Feeders33 f
-            JOIN   Meters m       ON m.Id  = f.MeterId
+            JOIN   Meters m ON m.Id = f.MeterId
             JOIN   (
-                SELECT Mid, Val, Ts,
+                SELECT Mid, Val,
                        ROW_NUMBER() OVER (PARTITION BY Mid ORDER BY Ts DESC) AS rn
                 FROM   MeterReadTfes
             ) t ON t.Mid = f.MeterId AND t.rn = 1
-            WHERE  f.MeterId IS NOT NULL
-              AND  f.IsDeleted = 0
+            WHERE  f.MeterId IS NOT NULL AND f.IsDeleted = 0
         ),
         latest_f11 AS (
-            SELECT f.Id    AS f11_id,
-                   f.SsId,
-                   t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh
+            SELECT f.SsId,
+                   SUM(t.Val * ISNULL(m.MultiplierFactor, 1)) AS f11_total_wh,
+                   COUNT(*) AS f11_meter_count
             FROM   Feeders11 f
-            JOIN   Meters m       ON m.Id  = f.MeterId
+            JOIN   Meters m ON m.Id = f.MeterId
             JOIN   (
-                SELECT Mid, Val, Ts,
+                SELECT Mid, Val,
                        ROW_NUMBER() OVER (PARTITION BY Mid ORDER BY Ts DESC) AS rn
                 FROM   MeterReadTfes
             ) t ON t.Mid = f.MeterId AND t.rn = 1
             WHERE  f.MeterId IS NOT NULL
+            GROUP BY f.SsId
         ),
-        ss_f11 AS (
-            SELECT SsId,
-                   SUM(energy_wh) AS f11_total_wh,
-                   COUNT(*)       AS f11_meter_count
-            FROM   latest_f11
-            GROUP BY SsId
-        ),
-        f33_ss_f11 AS (
-            SELECT f33.f33_id,
-                   f33.f33_name,
-                   f33.energy_wh           AS f33_energy_wh,
-                   s.Name                  AS ss_name,
-                   sf.f11_total_wh,
-                   sf.f11_meter_count
-            FROM   latest_f33 f33
-            JOIN   Feeder33Substation fs  ON fs.Feeders33Id    = f33.f33_id
-            JOIN   Substations s          ON s.Id              = fs.SubstationsId
-            JOIN   ss_f11 sf              ON sf.SsId           = s.Id
+        ss_totals AS (
+            -- Za svaku SS: zbir svih F33 koji u nju ulaze + F11 suma koja iz nje izlazi
+            SELECT s.Id                         AS ss_id,
+                   s.Name                       AS ss_name,
+                   STRING_AGG(f33.f33_name, ', ') AS feeders33,
+                   SUM(f33.energy_wh)           AS f33_total_wh,
+                   MAX(lf.f11_total_wh)         AS f11_total_wh,
+                   MAX(lf.f11_meter_count)      AS f11_meter_count
+            FROM   Substations s
+            JOIN   Feeder33Substation fs  ON fs.SubstationsId = s.Id
+            JOIN   latest_f33 f33         ON f33.f33_id       = fs.Feeders33Id
+            JOIN   latest_f11 lf          ON lf.SsId          = s.Id
             WHERE  f33.energy_wh > 0
-        ),
-        aggregated AS (
-            SELECT f33_id,
-                   f33_name,
-                   MAX(f33_energy_wh)         AS f33_energy_wh,
-                   STRING_AGG(ss_name, ', ')  AS substations,
-                   SUM(f11_total_wh)          AS f11_total_wh,
-                   SUM(f11_meter_count)       AS f11_meter_count
-            FROM   f33_ss_f11
-            GROUP BY f33_id, f33_name
+            GROUP BY s.Id, s.Name
         )
-        SELECT f33_name                                              AS [Feeder33],
-               substations                                          AS [Podstanice (SS)],
-               ROUND(f33_energy_wh   / 1000000.0, 2)               AS [F33 Energija (MWh)],
-               ROUND(f11_total_wh    / 1000000.0, 2)               AS [F11 Suma (MWh)],
-               ROUND((f33_energy_wh - f11_total_wh) / 1000000.0, 2) AS [Gubici (MWh)],
-               ROUND((f33_energy_wh - f11_total_wh) / f33_energy_wh * 100, 2) AS [Gubici (%)],
-               f11_meter_count                                      AS [Br. F11 merila]
-        FROM   aggregated
+        SELECT ss_name                                                    AS [Podstanica (SS)],
+               feeders33                                                  AS [Feeder33 fideri],
+               ROUND(f33_total_wh  / 1000000.0, 2)                       AS [F33 Ukupno (MWh)],
+               ROUND(f11_total_wh  / 1000000.0, 2)                       AS [F11 Suma (MWh)],
+               ROUND((f33_total_wh - f11_total_wh) / 1000000.0, 2)       AS [Gubici (MWh)],
+               ROUND((f33_total_wh - f11_total_wh) / f33_total_wh * 100, 2) AS [Gubici (%)],
+               f11_meter_count                                            AS [Br. F11 merila]
+        FROM   ss_totals
         ORDER BY [Gubici (%)] DESC
         """
         df = pd.read_sql(query, conn)
@@ -83,11 +67,10 @@ def load_losses() -> pd.DataFrame:
 
 
 def show_losses() -> None:
-    st.subheader("Analiza gubitaka po Feeder33")
+    st.subheader("Analiza gubitaka po podstanicama (SS)")
     st.caption(
-        "Gubici = Energija na Feeder33 − Suma energija na svim Feeder11 fiderima "
-        "koji izlaze iz SS u koji taj Feeder33 ulazi. "
-        "Prikazani su samo F33 fideri gde povezane SS imaju aktivna F11 merila."
+        "Gubici = Zbir energija svih F33 koji ulaze u SS − Suma energija F11 fidere koji izlaze iz SS. "
+        "Prikazane su samo SS gde postoje aktivna F11 merila."
     )
 
     df = load_losses()
@@ -97,7 +80,7 @@ def show_losses() -> None:
         return
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Fideri u analizi", len(df))
+    col1.metric("SS u analizi", len(df))
     col2.metric("Ukupni gubici (MWh)", f"{df['Gubici (MWh)'].sum():,.0f}")
     col3.metric("Prosečni gubici (%)", f"{df['Gubici (%)'].mean():.1f}%")
 
