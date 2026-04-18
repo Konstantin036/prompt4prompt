@@ -8,7 +8,20 @@ def load_losses() -> pd.DataFrame:
     conn = get_connection()
     try:
         query = """
-        WITH latest_f33 AS (
+        WITH has_reads AS (
+            SELECT DISTINCT Mid FROM MeterReadTfes
+        ),
+        f11_coverage AS (
+            -- Ukupan broj F11 fidera po SS i koliko ih ima merila sa ocitavanjima
+            SELECT f.SsId,
+                   COUNT(*)                                                       AS total_f11,
+                   SUM(CASE WHEN f.MeterId IS NOT NULL AND hr.Mid IS NOT NULL
+                            THEN 1 ELSE 0 END)                                   AS f11_with_reads
+            FROM   Feeders11 f
+            LEFT JOIN has_reads hr ON hr.Mid = f.MeterId
+            GROUP BY f.SsId
+        ),
+        latest_f33 AS (
             SELECT f.Id   AS f33_id,
                    f.Name AS f33_name,
                    t.Val * ISNULL(m.MultiplierFactor, 1) AS energy_wh
@@ -23,8 +36,7 @@ def load_losses() -> pd.DataFrame:
         ),
         latest_f11 AS (
             SELECT f.SsId,
-                   SUM(t.Val * ISNULL(m.MultiplierFactor, 1)) AS f11_total_wh,
-                   COUNT(*) AS f11_meter_count
+                   SUM(t.Val * ISNULL(m.MultiplierFactor, 1)) AS f11_total_wh
             FROM   Feeders11 f
             JOIN   Meters m ON m.Id = f.MeterId
             JOIN   (
@@ -36,27 +48,30 @@ def load_losses() -> pd.DataFrame:
             GROUP BY f.SsId
         ),
         ss_totals AS (
-            -- Za svaku SS: zbir svih F33 koji u nju ulaze + F11 suma koja iz nje izlazi
-            SELECT s.Id                         AS ss_id,
-                   s.Name                       AS ss_name,
+            SELECT s.Id                           AS ss_id,
+                   s.Name                         AS ss_name,
                    STRING_AGG(f33.f33_name, ', ') AS feeders33,
-                   SUM(f33.energy_wh)           AS f33_total_wh,
-                   MAX(lf.f11_total_wh)         AS f11_total_wh,
-                   MAX(lf.f11_meter_count)      AS f11_meter_count
+                   SUM(f33.energy_wh)             AS f33_total_wh,
+                   MAX(lf.f11_total_wh)           AS f11_total_wh,
+                   MAX(fc.total_f11)              AS total_f11,
+                   MAX(fc.f11_with_reads)         AS f11_with_reads
             FROM   Substations s
-            JOIN   Feeder33Substation fs  ON fs.SubstationsId = s.Id
-            JOIN   latest_f33 f33         ON f33.f33_id       = fs.Feeders33Id
-            JOIN   latest_f11 lf          ON lf.SsId          = s.Id
+            JOIN   Feeder33Substation fs ON fs.SubstationsId = s.Id
+            JOIN   latest_f33 f33        ON f33.f33_id       = fs.Feeders33Id
+            JOIN   latest_f11 lf         ON lf.SsId          = s.Id
+            JOIN   f11_coverage fc       ON fc.SsId          = s.Id
             WHERE  f33.energy_wh > 0
             GROUP BY s.Id, s.Name
         )
-        SELECT ss_name                                                    AS [Podstanica (SS)],
-               feeders33                                                  AS [Feeder33 fideri],
-               ROUND(f33_total_wh  / 1000000.0, 2)                       AS [F33 Ukupno (MWh)],
-               ROUND(f11_total_wh  / 1000000.0, 2)                       AS [F11 Suma (MWh)],
-               ROUND((f33_total_wh - f11_total_wh) / 1000000.0, 2)       AS [Gubici (MWh)],
-               ROUND((f33_total_wh - f11_total_wh) / f33_total_wh * 100, 2) AS [Gubici (%)],
-               f11_meter_count                                            AS [Br. F11 merila]
+        SELECT ss_name                                                          AS [Podstanica (SS)],
+               feeders33                                                        AS [Feeder33 fideri],
+               ROUND(f33_total_wh / 1000000.0, 2)                              AS [F33 Ukupno (MWh)],
+               ROUND(f11_total_wh / 1000000.0, 2)                              AS [F11 Suma (MWh)],
+               ROUND((f33_total_wh - f11_total_wh) / 1000000.0, 2)             AS [Gubici (MWh)],
+               ROUND((f33_total_wh - f11_total_wh) / f33_total_wh * 100, 2)    AS [Gubici (%)],
+               f11_with_reads                                                   AS [F11 sa merilom],
+               total_f11                                                        AS [F11 ukupno],
+               ROUND(f11_with_reads * 100.0 / total_f11, 0)                    AS [Pokrivenost (%)]
         FROM   ss_totals
         ORDER BY [Gubici (%)] DESC
         """
@@ -79,13 +94,18 @@ def show_losses() -> None:
         st.warning("Nema podataka za analizu gubitaka.")
         return
 
-    valid = df[df["Gubici (%)"] >= 0].copy()
-    invalid = df[df["Gubici (%)"] < 0].copy()
+    # Pouzdani: 100% F11 pokrivenost I pozitivni gubici
+    reliable = df[(df["Pokrivenost (%)"] == 100) & (df["Gubici (%)"] >= 0)].copy()
+    partial = df[(df["Pokrivenost (%)"] < 100) & (df["Gubici (%)"] >= 0)].copy()
+    negative = df[df["Gubici (%)"] < 0].copy()
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("SS u analizi", len(valid))
-    col2.metric("Ukupni gubici (MWh)", f"{valid['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici (%)", f"{valid['Gubici (%)'].mean():.1f}%")
+    col1.metric("SS u analizi (100% merila)", len(reliable))
+    col2.metric("Ukupni gubici (MWh)", f"{reliable['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosečni gubici (%)", f"{reliable['Gubici (%)'].mean():.1f}%" if not reliable.empty else "N/A")
+
+    display_cols = ["Podstanica (SS)", "Feeder33 fideri", "F33 Ukupno (MWh)",
+                    "F11 Suma (MWh)", "Gubici (MWh)", "Gubici (%)"]
 
     def highlight_losses(val):
         if isinstance(val, float):
@@ -97,14 +117,22 @@ def show_losses() -> None:
                 return "background-color: #997700; color: white"
         return ""
 
-    styled = valid.style.map(highlight_losses, subset=["Gubici (%)"])
+    styled = reliable[display_cols].style.map(highlight_losses, subset=["Gubici (%)"])
     st.dataframe(styled, use_container_width=True, height=500)
 
-    if not invalid.empty:
-        with st.expander(f"⚠️ {len(invalid)} SS sa negativnim gubicima (problem mernih podataka)"):
+    if not partial.empty:
+        with st.expander(f"⚠️ {len(partial)} SS sa nepotpunim F11 merilima (nepouzdani rezultati)"):
             st.caption(
-                "Ove SS imaju F11 sumu veću od F33 energije. "
-                "Uzrok je neusklađenost kumulativnih merila — merila F11 i F33 nisu počela da rade u isto vreme "
-                "ili su neka bila resetovana. Ovi slučajevi nisu uključeni u prosek."
+                "Ove SS nemaju merila na svim F11 fiderima. Gubici su precenjeni jer se "
+                "F33 energija (koja ulazi cela) poredi sa samo delom F11 (izlaz bez nemerenih fidera)."
             )
-            st.dataframe(invalid, use_container_width=True)
+            st.dataframe(partial[display_cols + ["F11 sa merilom", "F11 ukupno", "Pokrivenost (%)"]],
+                         use_container_width=True)
+
+    if not negative.empty:
+        with st.expander(f"⚠️ {len(negative)} SS sa negativnim gubicima (neusklađena merila)"):
+            st.caption(
+                "F11 suma veća od F33 energije — uzrok je neusklađenost kumulativnih merila "
+                "(različiti datumi instalacije ili resetovanja)."
+            )
+            st.dataframe(negative[display_cols], use_container_width=True)
