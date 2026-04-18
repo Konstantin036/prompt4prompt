@@ -64,9 +64,13 @@ with st.sidebar:
     st.divider()
     st.subheader("Filteri")
 
-    feeder11_options = {"Svi Feeders11": None} | {
+    f11_df = data["feeders11"]
+    if ss_ids:
+        f11_df = f11_df[f11_df["SsId"].isin(ss_ids)]
+    placeholder = f"Filtrirano ({len(f11_df)})..." if ss_ids else "Svi Feeders11"
+    feeder11_options = {placeholder: None} | {
         f"{row['Name']} (Id: {row['Id']})": int(row["Id"])
-        for _, row in data["feeders11"].iterrows()
+        for _, row in f11_df.iterrows()
     }
     feeder11_filter = feeder11_options[
         st.selectbox("Feeder11", list(feeder11_options.keys()))
