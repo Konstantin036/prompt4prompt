@@ -111,5 +111,5 @@ def show_losses() -> None:
                 return "background-color: #997700; color: white"
         return ""
 
-    styled = df.style.applymap(highlight_losses, subset=["Gubici (%)"])
+    styled = df.style.map(highlight_losses, subset=["Gubici (%)"])
     st.dataframe(styled, use_container_width=True, height=500)
