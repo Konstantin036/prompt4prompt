@@ -23,6 +23,35 @@ with st.sidebar:
     show_stats(data)
 
     st.divider()
+    st.subheader("Vidljivost slojeva")
+
+    ts_names = data["transmission_stations"]["Name"].dropna().tolist()
+    selected_ts_names = st.multiselect(
+        "Transmission Stations (110kV+)",
+        options=ts_names,
+        default=[],
+        placeholder="Prikaži sve...",
+    )
+    ts_name_to_id = dict(zip(
+        data["transmission_stations"]["Name"],
+        data["transmission_stations"]["Id"].astype(int),
+    ))
+    ts_ids = [ts_name_to_id[n] for n in selected_ts_names] or None
+
+    ss_names = data["substations"]["Name"].dropna().tolist()
+    selected_ss_names = st.multiselect(
+        "Substations (33kV)",
+        options=ss_names,
+        default=[],
+        placeholder="Prikaži sve...",
+    )
+    ss_name_to_id = dict(zip(
+        data["substations"]["Name"],
+        data["substations"]["Id"].astype(int),
+    ))
+    ss_ids = [ss_name_to_id[n] for n in selected_ss_names] or None
+
+    st.divider()
     st.subheader("Filteri")
 
     feeder11_options = {"Svi Feeders11": None} | {
@@ -38,12 +67,18 @@ with st.sidebar:
         for _, row in data["substations"].iterrows()
     }
     substation_filter = ss_options[
-        st.selectbox("Substation", list(ss_options.keys()))
+        st.selectbox("Substation (filter DT)", list(ss_options.keys()))
     ]
 
 # --- Mapa ---
 st.subheader("Mapa mreže")
-m = create_map(data, feeder11_filter=feeder11_filter, substation_filter=substation_filter)
+m = create_map(
+    data,
+    feeder11_filter=feeder11_filter,
+    substation_filter=substation_filter,
+    ts_ids=ts_ids,
+    ss_ids=ss_ids,
+)
 st_folium(m, use_container_width=True, height=600, returned_objects=[])
 
 # --- Tabele ---

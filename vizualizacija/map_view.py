@@ -1,6 +1,18 @@
 import folium
 import pandas as pd
 
+# Paleta boja za DT stanice — svaki SS dobija svoju boju
+_SS_PALETTE = [
+    "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00",
+    "#a65628", "#f781bf", "#66c2a5", "#fc8d62", "#8da0cb",
+    "#e78ac3", "#a6d854", "#ffd92f", "#e5c494", "#b3b3b3",
+]
+
+
+def _build_ss_color_map(data: dict) -> dict:
+    ss_ids = data["substations"]["Id"].tolist()
+    return {int(ss_id): _SS_PALETTE[i % len(_SS_PALETTE)] for i, ss_id in enumerate(ss_ids)}
+
 
 def _valid_coords(lat, lon) -> bool:
     if pd.isna(lat) or pd.isna(lon):
@@ -92,7 +104,8 @@ def _get_ss_id_for_feeder11(data: dict, feeder11_id: int):
     return int(ss_id) if not pd.isna(ss_id) else None
 
 
-def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> folium.Map:
+def create_map(data: dict, feeder11_filter=None, substation_filter=None,
+               ts_ids=None, ss_ids=None) -> folium.Map:
     center = get_map_center(data)
     m = folium.Map(location=center, zoom_start=10)
 
@@ -103,7 +116,10 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
     ts_ss_group = folium.FeatureGroup(name="TS → SS veze", show=True)
     ss_dt_group = folium.FeatureGroup(name="SS → DT veze", show=True)
 
-    for _, row in data["transmission_stations"].iterrows():
+    ts_data = data["transmission_stations"]
+    if ts_ids:
+        ts_data = ts_data[ts_data["Id"].isin(ts_ids)]
+    for _, row in ts_data.iterrows():
         if not _valid_coords(row["Latitude"], row["Longitude"]):
             continue
         folium.Marker(
@@ -112,13 +128,19 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
             icon=folium.Icon(color="blue", icon="bolt", prefix="fa"),
         ).add_to(ts_group)
 
-    for _, row in data["substations"].iterrows():
+    ss_color_map = _build_ss_color_map(data)
+    ss_data = data["substations"]
+    if ss_ids:
+        ss_data = ss_data[ss_data["Id"].isin(ss_ids)]
+    for _, row in ss_data.iterrows():
         if not _valid_coords(row["Latitude"], row["Longitude"]):
             continue
+        ss_color = ss_color_map.get(int(row["Id"]), "#ff7800")
         folium.Marker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
             popup=f"<b>{row['Name']}</b><br>Id: {row['Id']}",
             icon=folium.Icon(color="orange", icon="plug", prefix="fa"),
+            tooltip=row["Name"],
         ).add_to(ss_group)
 
     f11 = data["feeders11"].set_index("Id")
@@ -128,6 +150,10 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
     if substation_filter is not None:
         valid_ids = f11[f11["SsId"] == substation_filter].index.tolist()
         dt_data = dt_data[dt_data["Feeder11Id"].isin(valid_ids)]
+    # Ako je SS vidljivost filtrirana, prikaži samo DT koji pripadaju vidljivim SS
+    if ss_ids:
+        visible_f11_ids = f11[f11["SsId"].isin(ss_ids)].index.tolist()
+        dt_data = dt_data[dt_data["Feeder11Id"].isin(visible_f11_ids)]
 
     connected_f11_ids = set(f11.index)
     for _, row in dt_data.iterrows():
@@ -135,12 +161,17 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None) -> foli
             continue
         f11_id = row["Feeder11Id"]
         is_connected = (not pd.isna(f11_id)) and (int(f11_id) in connected_f11_ids)
+        if is_connected:
+            ss_id_raw = f11.loc[int(f11_id), "SsId"]
+            dt_color = ss_color_map.get(int(ss_id_raw), "#4daf4a") if not pd.isna(ss_id_raw) else "gray"
+        else:
+            dt_color = "gray"
         marker = folium.CircleMarker(
             location=[float(row["Latitude"]), float(row["Longitude"])],
             radius=6,
-            color="green" if is_connected else "gray",
+            color=dt_color,
             fill=True,
-            fill_color="green" if is_connected else "gray",
+            fill_color=dt_color,
             fill_opacity=0.7,
             popup=f"<b>{row['Name']}</b><br>Id: {row['Id']}<br>Snaga: {row['NameplateRating']} kVA"
                   + ("" if is_connected else "<br><i>Nema Feeder11 veze</i>"),
