@@ -144,8 +144,9 @@ def build_ss_dt_chains(data: dict, feeder11_filter=None, substation_filter=None,
         visible_f11_ids = f11[f11["SsId"].isin(ss_ids)].index.tolist()
         dt = dt[dt["Feeder11Id"].isin(visible_f11_ids)]
 
-    # Grupiši DT po SS-u
-    ss_to_dts: dict[int, list] = {}
+    # Grupiši DT po Feeder11 — svaki fider dobija svoj lanac
+    f11_to_dts: dict[int, list] = {}
+    f11_to_ss: dict[int, int] = {}
     for _, dt_row in dt.iterrows():
         f11_id = dt_row["Feeder11Id"]
         if pd.isna(f11_id) or int(f11_id) not in f11.index:
@@ -155,13 +156,15 @@ def build_ss_dt_chains(data: dict, feeder11_filter=None, substation_filter=None,
             continue
         if not _valid_coords(dt_row["Latitude"], dt_row["Longitude"]):
             continue
-        ss_id_int = int(ss_id)
-        ss_to_dts.setdefault(ss_id_int, []).append(
+        f11_id_int = int(f11_id)
+        f11_to_dts.setdefault(f11_id_int, []).append(
             [float(dt_row["Latitude"]), float(dt_row["Longitude"])]
         )
+        f11_to_ss[f11_id_int] = int(ss_id)
 
     chains = []
-    for ss_id_int, dt_points in ss_to_dts.items():
+    for f11_id_int, dt_points in f11_to_dts.items():
+        ss_id_int = f11_to_ss[f11_id_int]
         ss_row = ss.loc[ss_id_int]
         if not _valid_coords(ss_row["Latitude"], ss_row["Longitude"]):
             continue
