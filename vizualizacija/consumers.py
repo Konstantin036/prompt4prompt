@@ -177,9 +177,8 @@ def show_consumers() -> None:
     fig.update_layout(
         title="Distribucija potrošača — hijerarhija TS → SS → F11",
         coloraxis_colorbar=dict(
-            title="S (kVA)",
+            title=dict(text="S (kVA)", font=dict(color="#8892b0")),
             tickfont=dict(color="#a0aec0"),
-            titlefont=dict(color="#8892b0"),
         ),
     )
     st.plotly_chart(fig, use_container_width=True)
