@@ -168,6 +168,14 @@ def load_losses() -> pd.DataFrame:
         conn.close()
 
 
+_ANOMALY_THRESHOLD = 70  # % — iznad ovoga ili ispod 0 smatramo anomalijom
+
+
+def _split_anomalies(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    mask = (df["Gubici (%)"] < 0) | (df["Gubici (%)"] > _ANOMALY_THRESHOLD)
+    return df[~mask].reset_index(drop=True), df[mask].reset_index(drop=True)
+
+
 def show_losses() -> None:
     st.subheader("Analiza gubitaka po podstanicama (SS)")
 
@@ -177,20 +185,20 @@ def show_losses() -> None:
         st.warning("Nema podataka za analizu gubitaka.")
         return
 
+    df_normal, df_anom = _split_anomalies(df)
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("SS u analizi", len(df))
-    col2.metric("Ukupni gubici (MWh)", f"{df['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici (%)", f"{df['Gubici (%)'].mean():.1f}%")
+    col1.metric("SS u analizi", len(df_normal))
+    col2.metric("Ukupni gubici (MWh)", f"{df_normal['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosečni gubici (%)", f"{df_normal['Gubici (%)'].mean():.1f}%")
 
     def highlight_row(row):
         styles = [""] * len(row)
         pct = row.get("Gubici (%)", 0)
         pokr = row.get("Pokr. (%)", 100)
         deli = row.get("F33 deli SS", 1)
-        loss_col = df.columns.get_loc("Gubici (%)")
-        if pct < 0:
-            styles[loss_col] = "background-color: #1a1a6e; color: white"
-        elif pokr < 100 or deli > 1:
+        loss_col = df_normal.columns.get_loc("Gubici (%)")
+        if pokr < 100 or deli > 1:
             styles[loss_col] = "background-color: #4a4a00; color: white"
         elif pct > 20:
             styles[loss_col] = "background-color: #8b0000; color: white"
@@ -200,14 +208,31 @@ def show_losses() -> None:
             styles[loss_col] = "background-color: #997700; color: white"
         return styles
 
-    styled = df.style.apply(highlight_row, axis=1)
-    st.dataframe(styled, use_container_width=True, height=600)
+    st.dataframe(df_normal.style.apply(highlight_row, axis=1), use_container_width=True, height=500)
     st.caption(
         "Boje kolone Gubici (%): "
-        "🟦 negativni (neusklađena merila) | "
         "🟨 nepouzdani (nepotpuna merila ili deljeni F33) | "
         "🟥 >20% | 🟧 >10% | 🟨 >5%"
     )
+
+    if not df_anom.empty:
+        with st.expander(f"Anomalije SS ({len(df_anom)} redova — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)", expanded=False):
+            st.caption(
+                "Ovi redovi imaju nerealne vrednosti gubitaka. "
+                "Uzroci: neusklađena kumulativna merila, deljeni F33 fideri, nepotpuno merenje."
+            )
+
+            def highlight_anom(row):
+                styles = [""] * len(row)
+                loss_col = df_anom.columns.get_loc("Gubici (%)")
+                pct = row.get("Gubici (%)", 0)
+                if pct < 0:
+                    styles[loss_col] = "background-color: #1a1a6e; color: white"
+                else:
+                    styles[loss_col] = "background-color: #8b0000; color: white"
+                return styles
+
+            st.dataframe(df_anom.style.apply(highlight_anom, axis=1), use_container_width=True)
 
     st.divider()
     st.subheader("Analiza gubitaka po Feeder11 fiderima")
@@ -218,19 +243,19 @@ def show_losses() -> None:
         st.warning("Nema F11 podataka za analizu gubitaka.")
         return
 
+    df11_normal, df11_anom = _split_anomalies(df11)
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("F11 fidera u analizi", len(df11))
-    col2.metric("Ukupni gubici F11 (MWh)", f"{df11['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosečni gubici F11 (%)", f"{df11['Gubici (%)'].mean():.1f}%")
+    col1.metric("F11 fidera u analizi", len(df11_normal))
+    col2.metric("Ukupni gubici F11 (MWh)", f"{df11_normal['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosečni gubici F11 (%)", f"{df11_normal['Gubici (%)'].mean():.1f}%")
 
     def highlight_f11(row):
         styles = [""] * len(row)
         pct = row.get("Gubici (%)", 0)
         pokr = row.get("Pokr. (%)", 100)
-        loss_col = df11.columns.get_loc("Gubici (%)")
-        if pct < 0:
-            styles[loss_col] = "background-color: #1a1a6e; color: white"
-        elif pokr < 100:
+        loss_col = df11_normal.columns.get_loc("Gubici (%)")
+        if pokr < 100:
             styles[loss_col] = "background-color: #4a4a00; color: white"
         elif pct > 20:
             styles[loss_col] = "background-color: #8b0000; color: white"
@@ -240,9 +265,27 @@ def show_losses() -> None:
             styles[loss_col] = "background-color: #997700; color: white"
         return styles
 
-    styled11 = df11.style.apply(highlight_f11, axis=1)
-    st.dataframe(styled11, use_container_width=True, height=600)
+    st.dataframe(df11_normal.style.apply(highlight_f11, axis=1), use_container_width=True, height=500)
     st.caption(
         "Gubici F11 = F11 energija − Zbir DT merila na tom fideru. "
-        "Boje: 🟦 negativni | 🟨 nepotpuna DT merila | 🟥 >20% | 🟧 >10% | 🟨 >5%"
+        "Boje: 🟨 nepotpuna DT merila | 🟥 >20% | 🟧 >10% | 🟨 >5%"
     )
+
+    if not df11_anom.empty:
+        with st.expander(f"Anomalije F11 ({len(df11_anom)} redova — gubici < 0% ili > {_ANOMALY_THRESHOLD}%)", expanded=False):
+            st.caption(
+                "Ovi redovi imaju nerealne vrednosti gubitaka. "
+                "Uzroci: neusklađena kumulativna merila (F11 meter stariji od DT merila), nepotpuno DT merenje."
+            )
+
+            def highlight_f11_anom(row):
+                styles = [""] * len(row)
+                loss_col = df11_anom.columns.get_loc("Gubici (%)")
+                pct = row.get("Gubici (%)", 0)
+                if pct < 0:
+                    styles[loss_col] = "background-color: #1a1a6e; color: white"
+                else:
+                    styles[loss_col] = "background-color: #8b0000; color: white"
+                return styles
+
+            st.dataframe(df11_anom.style.apply(highlight_f11_anom, axis=1), use_container_width=True)
