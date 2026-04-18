@@ -59,7 +59,7 @@ def load_f11() -> pd.DataFrame:
             SELECT
                 d.Feeder11Id,
                 SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
-                SUM(d.NameplateRating) / 1000.0   AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0      AS S_nominal_kVA,
                 COUNT(*)                           AS dt_total,
                 SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads
             FROM DistributionSubstation d
@@ -107,7 +107,7 @@ def load_f11_no_reads() -> pd.DataFrame:
             SELECT
                 d.Feeder11Id,
                 COUNT(*)                                                     AS dt_total,
-                SUM(d.NameplateRating) / 1000.0                             AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0                                AS S_nominal_kVA,
                 SUM(CASE WHEN mwr.Mid IS NOT NULL THEN 1 ELSE 0 END)        AS dt_with_reads
             FROM DistributionSubstation d
             LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
@@ -178,7 +178,7 @@ def load_f33() -> pd.DataFrame:
             SELECT
                 d.Feeder11Id,
                 SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
-                SUM(d.NameplateRating) / 1000.0   AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0      AS S_nominal_kVA,
                 SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads,
                 COUNT(*)                           AS dt_total
             FROM DistributionSubstation d
@@ -234,7 +234,7 @@ def load_f33_no_reads() -> pd.DataFrame:
             SELECT
                 d.Feeder11Id,
                 COUNT(*)                                                    AS dt_total,
-                SUM(d.NameplateRating) / 1000.0                            AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0                               AS S_nominal_kVA,
                 SUM(CASE WHEN mwr.Mid IS NOT NULL THEN 1 ELSE 0 END)       AS dt_with_reads
             FROM DistributionSubstation d
             LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
