@@ -1,7 +1,8 @@
 import pandas as pd
 import folium
 from vizualizacija.map_view import (get_map_center, build_ts_ss_lines, build_ss_dt_lines,
-                                    build_ss_dt_chains, _nearest_neighbor_chain, create_map, _valid_coords)
+                                    build_ss_dt_chains, build_ts_ss_chains,
+                                    _nearest_neighbor_chain, create_map, _valid_coords)
 
 
 def _make_data():
@@ -96,6 +97,16 @@ def test_build_ss_dt_chains_returns_chain_starting_at_ss():
     # Chain ima SS + DT = 2 tačke
     assert len(chain) == 2
     assert ss_id == 10
+
+
+def test_build_ts_ss_chains_returns_chain_starting_at_ts():
+    data = _make_data()
+    chains = build_ts_ss_chains(data)
+    assert len(chains) == 1
+    chain, ts_id = chains[0]
+    assert chain[0] == [44.0, 21.0]  # počinje na TS
+    assert len(chain) == 2            # TS + SS
+    assert ts_id == 1
 
 
 def test_build_ts_ss_lines_with_ss_filter():

@@ -44,7 +44,6 @@ def build_ts_ss_lines(data: dict, ss_id_filter=None) -> list:
     for _, row in data["feeder33_substation"].iterrows():
         f33_id = row["Feeders33Id"]
         ss_id = row["SubstationsId"]
-        # Filtriraj na specifičan SS kada je aktivan filter
         if ss_id_filter is not None and int(ss_id) != ss_id_filter:
             continue
         if f33_id not in f33.index or ss_id not in ss.index:
@@ -63,6 +62,49 @@ def build_ts_ss_lines(data: dict, ss_id_filter=None) -> list:
              [float(ss_row["Latitude"]), float(ss_row["Longitude"])])
         )
     return lines
+
+
+def build_ts_ss_chains(data: dict, ss_id_filter=None, ts_ids=None) -> list:
+    """
+    Returns list of (chain, ts_id) where chain is [ts_coords, ss1, ss2, ...]
+    ordered by nearest-neighbor from the TS outward.
+    """
+    ts = data["transmission_stations"].set_index("Id")
+    ss = data["substations"].set_index("Id")
+    f33 = data["feeders33"].set_index("Id")
+
+    # Grupiši SS po TS-u
+    ts_to_ss: dict[int, list] = {}
+    for _, row in data["feeder33_substation"].iterrows():
+        f33_id = row["Feeders33Id"]
+        ss_id = row["SubstationsId"]
+        if ss_id_filter is not None and int(ss_id) != ss_id_filter:
+            continue
+        if f33_id not in f33.index or ss_id not in ss.index:
+            continue
+        ts_id = f33.loc[f33_id, "TsId"]
+        if pd.isna(ts_id) or int(ts_id) not in ts.index:
+            continue
+        if ts_ids and int(ts_id) not in ts_ids:
+            continue
+        ss_row = ss.loc[ss_id]
+        if not _valid_coords(ss_row["Latitude"], ss_row["Longitude"]):
+            continue
+        ts_id_int = int(ts_id)
+        ts_to_ss.setdefault(ts_id_int, []).append(
+            [float(ss_row["Latitude"]), float(ss_row["Longitude"])]
+        )
+
+    chains = []
+    for ts_id_int, ss_points in ts_to_ss.items():
+        ts_row = ts.loc[ts_id_int]
+        if not _valid_coords(ts_row["Latitude"], ts_row["Longitude"]):
+            continue
+        ts_point = [float(ts_row["Latitude"]), float(ts_row["Longitude"])]
+        ordered = _nearest_neighbor_chain(ts_point, ss_points)
+        chains.append(([ts_point] + ordered, ts_id_int))
+
+    return chains
 
 
 def _nearest_neighbor_chain(start: list, points: list) -> list:
@@ -246,8 +288,8 @@ def create_map(data: dict, feeder11_filter=None, substation_filter=None,
     elif substation_filter is not None:
         ss_id_for_ts_filter = substation_filter
 
-    for ts_coords, ss_coords in build_ts_ss_lines(data, ss_id_filter=ss_id_for_ts_filter):
-        folium.PolyLine([ts_coords, ss_coords], color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
+    for chain, _ in build_ts_ss_chains(data, ss_id_filter=ss_id_for_ts_filter, ts_ids=ts_ids):
+        folium.PolyLine(chain, color="darkblue", weight=2, opacity=0.8).add_to(ts_ss_group)
 
     for chain, chain_ss_id in build_ss_dt_chains(data, feeder11_filter, substation_filter, ss_ids):
         color = ss_color_map.get(chain_ss_id, "#4daf4a")
