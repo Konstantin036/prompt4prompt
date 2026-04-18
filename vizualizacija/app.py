@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from db import load_data
+from losses import show_losses
 from map_view import create_map
 from stats import show_stats
 
@@ -89,6 +90,9 @@ m = create_map(
     ss_ids=ss_ids,
 )
 st_folium(m, use_container_width=True, height=600, returned_objects=[])
+
+# --- Analiza gubitaka ---
+show_losses()
 
 # --- Tabele ---
 st.subheader("Podaci iz baze")
