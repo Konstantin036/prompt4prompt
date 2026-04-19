@@ -8,6 +8,7 @@ from load import show_load
 from map_view import create_map
 from stats import show_stats
 from outages import show_outages
+from prediction import show_prediction
 
 st.set_page_config(
     page_title="Analitika mreže — EPS",
@@ -269,12 +270,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_map, tab_losses, tab_consumers, tab_load, tab_outages, tab_data = st.tabs([
+tab_map, tab_losses, tab_consumers, tab_load, tab_outages, tab_pred, tab_data = st.tabs([
     "🗺️  Mapa mreže",
     "📉  Gubici",
     "👥  Potrošači",
     "⚡  Opterećenje",
     "🔴  Nestanci",
+    "🔮  Predikcija",
     "🗄️  Podaci",
 ])
 
@@ -301,6 +303,9 @@ with tab_load:
 
 with tab_outages:
     show_outages()
+
+with tab_pred:
+    show_prediction()
 
 with tab_data:
     st.markdown(
