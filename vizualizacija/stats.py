@@ -39,7 +39,12 @@ def compute_stats(data: dict, ts_ids=None, ss_ids=None, feeder11_filter=None) ->
 
 def show_stats(data: dict, ts_ids=None, ss_ids=None, feeder11_filter=None) -> None:
     s = compute_stats(data, ts_ids=ts_ids, ss_ids=ss_ids, feeder11_filter=feeder11_filter)
-    st.sidebar.subheader("Statistike mreže")
+    st.sidebar.markdown(
+        '<p style="color:#FF6B35;font-size:1.0rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.12em;'
+        'text-align:center;margin:0.5rem 0 0.75rem 0;">📊 Statistike mreže</p>',
+        unsafe_allow_html=True,
+    )
     col1, col2 = st.sidebar.columns(2)
     col1.metric("TS Stanice", s["ts_count"])
     col2.metric("Substations", s["ss_count"])

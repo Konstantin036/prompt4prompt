@@ -10,7 +10,7 @@ from stats import show_stats
 from outages import show_outages
 
 st.set_page_config(
-    page_title="Grid Analytics — EPS",
+    page_title="Analitika mreže — EPS",
     page_icon="⚡",
     layout="wide",
 )
@@ -66,8 +66,9 @@ st.markdown("""
 .stTabs [data-baseweb="tab"] {
     color: #8b949e !important;
     border-radius: 10px !important;
-    font-weight: 500 !important;
-    padding: 9px 22px !important;
+    font-weight: 600 !important;
+    font-size: 1rem !important;
+    padding: 11px 26px !important;
     transition: all 0.25s ease !important;
     border: none !important;
 }
@@ -83,6 +84,46 @@ st.markdown("""
 }
 .stTabs [data-baseweb="tab-border"] {
     display: none !important;
+}
+
+/* === SIDEBAR SECTION LABELS === */
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.05em !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stMultiSelect label,
+[data-testid="stSidebar"] .stSelectbox label {
+    font-size: 0.95rem !important;
+    font-weight: 600 !important;
+    color: #c9d1d9 !important;
+}
+
+/* === CUSTOM LOADER === */
+@keyframes eps-spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+[data-testid="stStatusWidget"] svg {
+    display: none !important;
+}
+[data-testid="stStatusWidget"] > div {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+[data-testid="stStatusWidget"] > div::before {
+    content: '' !important;
+    display: inline-block !important;
+    width: 18px !important;
+    height: 18px !important;
+    border: 2.5px solid rgba(255,107,53,0.25) !important;
+    border-top-color: #FF6B35 !important;
+    border-radius: 50% !important;
+    animation: eps-spin 0.75s linear infinite !important;
+    flex-shrink: 0 !important;
 }
 
 /* === SIDEBAR === */
@@ -139,20 +180,13 @@ hr {
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(
-        '<p style="color:#FF6B35;font-size:0.75rem;font-weight:700;'
-        'text-transform:uppercase;letter-spacing:0.15em;margin-bottom:0.5rem;">'
-        '⚡ Kontrolna tabla</p>',
+        '<p style="color:#FF6B35;font-size:1.1rem;font-weight:800;'
+        'text-transform:uppercase;letter-spacing:0.15em;'
+        'text-align:center;margin-bottom:1rem;">⚡ Kontrolna tabla</p>',
         unsafe_allow_html=True,
     )
 
     data = load_data()
-
-    st.markdown(
-        '<p style="color:#FF6B35;font-size:0.75rem;font-weight:700;'
-        'text-transform:uppercase;letter-spacing:0.12em;'
-        'text-align:center;margin:0 0 0.75rem 0;">🗺️ Slojevi mape</p>',
-        unsafe_allow_html=True,
-    )
 
     ts_name_to_id = dict(zip(
         data["transmission_stations"]["Name"],
@@ -191,7 +225,7 @@ with st.sidebar:
 
     st.divider()
     st.markdown(
-        '<p style="color:#FF6B35;font-size:0.75rem;font-weight:700;'
+        '<p style="color:#FF6B35;font-size:1.0rem;font-weight:700;'
         'text-transform:uppercase;letter-spacing:0.12em;'
         'text-align:center;margin:0 0 0.75rem 0;">🔍 Filteri</p>',
         unsafe_allow_html=True,
@@ -226,7 +260,7 @@ st.markdown("""
         letter-spacing: -0.04em;
         line-height: 1.1;
         margin: 0;
-    ">⚡ Grid Analytics</div>
+    ">⚡ Analitika mreže</div>
     <div style="color:#8892b0;font-size:0.88rem;margin-top:6px;
                 text-transform:uppercase;letter-spacing:0.1em;font-weight:500;">
         Elektrodistributivna mreža &nbsp;·&nbsp; Vizualizacija u realnom vremenu
