@@ -40,7 +40,7 @@ def load_current_utilization() -> pd.DataFrame:
         )
         SELECT
             d.Name          AS DT,
-            d.Lat, d.Lon,
+            d.Latitude AS Lat, d.Longitude AS Lon,
             d.NameplateRating AS DT_kVA,
             f11.Id          AS F11Id,
             f11.Name        AS Feeder11,
@@ -68,7 +68,7 @@ def load_current_utilization() -> pd.DataFrame:
         AND ISNULL(V_A,0) < 30000
         AND ISNULL(V_B,0) < 30000
         AND ISNULL(V_C,0) < 30000
-        AND d.Lat IS NOT NULL AND d.Lon IS NOT NULL
+        AND d.Latitude IS NOT NULL AND d.Longitude IS NOT NULL
         AND d.NameplateRating > 0
         AND (ISNULL(V_A*I_A,0) + ISNULL(V_B*I_B,0) + ISNULL(V_C*I_C,0)) > 0
         """
