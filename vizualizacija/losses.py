@@ -170,11 +170,24 @@ def load_losses() -> pd.DataFrame:
 
 
 _ANOMALY_THRESHOLD = 70
+_MIN_COVERAGE_PCT = 30
 
 
-def _split_anomalies(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    mask = (df["Gubici (%)"] < 0) | (df["Gubici (%)"] > _ANOMALY_THRESHOLD)
-    return df[~mask].reset_index(drop=True), df[mask].reset_index(drop=True)
+def _split_results(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Returns (reliable, low_coverage, anomaly).
+
+    anomaly     — Gubici < 0% ili > 70%: matematički nemoguće, netačno merenje
+    low_coverage— Pokr. < 30%: DT pokrivenost preniska za pouzdane gubitke
+    reliable    — ostatak
+    """
+    anom_mask = (df["Gubici (%)"] < 0) | (df["Gubici (%)"] > _ANOMALY_THRESHOLD)
+    non_anom = df[~anom_mask].reset_index(drop=True)
+    low_cov_mask = non_anom["Pokr. (%)"] < _MIN_COVERAGE_PCT
+    return (
+        non_anom[~low_cov_mask].reset_index(drop=True),
+        non_anom[low_cov_mask].reset_index(drop=True),
+        df[anom_mask].reset_index(drop=True),
+    )
 
 
 def _loss_color_point(pct: float) -> str:
@@ -295,33 +308,43 @@ def show_losses() -> None:
         st.warning("Nema podataka za analizu gubitaka.")
         return
 
-    df_normal, df_anom = _split_anomalies(df)
+    df_ok, df_lowcov, df_anom = _split_results(df)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("SS u analizi", len(df_normal))
-    col2.metric("Ukupni gubici (MWh)", f"{df_normal['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosječni gubici", f"{df_normal['Gubici (%)'].mean():.1f}%")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("SS pouzdano (Pokr. ≥30%)", len(df_ok))
+    col2.metric("Ukupni gubici (MWh)", f"{df_ok['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosječni gubici", f"{df_ok['Gubici (%)'].mean():.1f}%")
+    col4.metric("SS nepotpuna merenja", len(df_lowcov),
+                help=f"Pokr. <{_MIN_COVERAGE_PCT}% — gubici nisu pouzdani")
 
-    _scatter_losses(
-        df_normal,
-        mwh_col="F33 (MWh)",
-        label_col="Podstanica (SS)",
-        title="Pouzdanost mjerenja vs. Gubici energije — nivo SS",
-    )
-
-    st.caption(
-        "Svaka tačka = jedna podstanica. "
-        "Veličina = F33 energija (MWh). "
-        "X-osa: pokrivenost merenja (viša = pouzdaniji podaci). "
-        "Y-osa: gubici (tačke gore-desno su potvrđene problematične SS)."
-    )
-
-    with st.expander(f"Tabela — {len(df_normal)} podstanica", expanded=False):
-        _styled_table(df_normal)
-        st.caption(
-            "Boje: 🟨 nepouzdani podaci (nepotpuna merila / deljeni F33) "
-            "| 🟥 >20% | 🟧 >10% | 🟡 >5%"
+    if df_ok.empty:
+        st.info("Nema SS sa dovoljnom pokrivenošću merenja (≥30%) za pouzdanu analizu gubitaka.")
+    else:
+        _scatter_losses(
+            df_ok,
+            mwh_col="F33 (MWh)",
+            label_col="Podstanica (SS)",
+            title="Pouzdanost mjerenja vs. Gubici energije — nivo SS (Pokr. ≥ 30%)",
         )
+        st.caption(
+            "Prikazane samo SS sa ≥30% pokrivenosti DT merenja. "
+            "Tačke gore-desno (visoka pokrivenost + visoki gubici) = potvrđene problematične SS."
+        )
+        with st.expander(f"Tabela — {len(df_ok)} podstanica (pouzdano)", expanded=False):
+            _styled_table(df_ok)
+            st.caption("Boje: 🟨 deljeni F33 | 🟥 >20% | 🟧 >10% | 🟡 >5%")
+
+    if not df_lowcov.empty:
+        with st.expander(
+            f"⚠️ Nepotpuna merenja — {len(df_lowcov)} SS sa Pokr. <{_MIN_COVERAGE_PCT}% "
+            f"(gubici precenjeni, prikazano informativno)",
+            expanded=False,
+        ):
+            st.caption(
+                f"Pokr. <{_MIN_COVERAGE_PCT}%: DT merači pokrivaju premalo potrošnje — "
+                "izračunati gubici su gornja granica, ne stvarna vrednost."
+            )
+            _styled_table(df_lowcov)
 
     if not df_anom.empty:
         with st.expander(
@@ -361,44 +384,55 @@ def show_losses() -> None:
         st.warning("Nema F11 podataka za analizu gubitaka.")
         return
 
-    df11_normal, df11_anom = _split_anomalies(df11)
+    df11_ok, df11_lowcov, df11_anom = _split_results(df11)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("F11 fidera u analizi", len(df11_normal))
-    col2.metric("Ukupni gubici F11 (MWh)", f"{df11_normal['Gubici (MWh)'].sum():,.0f}")
-    col3.metric("Prosječni gubici F11", f"{df11_normal['Gubici (%)'].mean():.1f}%")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("F11 pouzdano (Pokr. ≥30%)", len(df11_ok))
+    col2.metric("Ukupni gubici F11 (MWh)", f"{df11_ok['Gubici (MWh)'].sum():,.0f}")
+    col3.metric("Prosječni gubici F11", f"{df11_ok['Gubici (%)'].mean():.1f}%")
+    col4.metric("F11 nepotpuna merenja", len(df11_lowcov),
+                help=f"Pokr. <{_MIN_COVERAGE_PCT}% — gubici precenjeni")
 
-    _scatter_losses(
-        df11_normal,
-        mwh_col="F11 (MWh)",
-        label_col="Feeder11",
-        title="Pouzdanost mjerenja vs. Gubici energije — nivo F11",
-    )
+    if df11_ok.empty:
+        st.info("Nema F11 fidera sa dovoljnom pokrivenošću merenja (≥30%).")
+    else:
+        _scatter_losses(
+            df11_ok,
+            mwh_col="F11 (MWh)",
+            label_col="Feeder11",
+            title="Pouzdanost mjerenja vs. Gubici energije — nivo F11 (Pokr. ≥ 30%)",
+        )
+        st.caption(
+            "Prikazani samo F11 fideri sa ≥30% DT pokrivenosti. "
+            "Tačke gore-desno = potvrđeni visoki gubici — prioritet za terensku inspekciju."
+        )
+        with st.expander(f"Tabela — {len(df11_ok)} F11 fidera (pouzdano)", expanded=False):
 
-    st.caption(
-        "Svaka tačka = jedan F11 fider. "
-        "Veličina = F11 energija (MWh). "
-        "Tačke gore-desno (visoka pokrivenost + visoki gubici) = prioritet za terensku inspekciju."
-    )
+            def highlight_f11(row):
+                styles = [""] * len(row)
+                pct = row.get("Gubici (%)", 0)
+                loss_col = df11_ok.columns.get_loc("Gubici (%)")
+                if pct > 20:
+                    styles[loss_col] = "background-color: #3d0a0a; color: #e53e3e"
+                elif pct > 10:
+                    styles[loss_col] = "background-color: #2d1500; color: #FF8C00"
+                elif pct > 5:
+                    styles[loss_col] = "background-color: #2d2000; color: #ECC94B"
+                return styles
 
-    with st.expander(f"Tabela — {len(df11_normal)} F11 fidera", expanded=False):
+            st.dataframe(df11_ok.style.apply(highlight_f11, axis=1), use_container_width=True, height=420)
 
-        def highlight_f11(row):
-            styles = [""] * len(row)
-            pct = row.get("Gubici (%)", 0)
-            pokr = row.get("Pokr. (%)", 100)
-            loss_col = df11_normal.columns.get_loc("Gubici (%)")
-            if pokr < 100:
-                styles[loss_col] = "background-color: #2d2d00; color: #ECC94B"
-            elif pct > 20:
-                styles[loss_col] = "background-color: #3d0a0a; color: #e53e3e"
-            elif pct > 10:
-                styles[loss_col] = "background-color: #2d1500; color: #FF8C00"
-            elif pct > 5:
-                styles[loss_col] = "background-color: #2d2000; color: #ECC94B"
-            return styles
-
-        st.dataframe(df11_normal.style.apply(highlight_f11, axis=1), use_container_width=True, height=420)
+    if not df11_lowcov.empty:
+        with st.expander(
+            f"⚠️ Nepotpuna merenja — {len(df11_lowcov)} F11 sa Pokr. <{_MIN_COVERAGE_PCT}% "
+            f"(gubici precenjeni)",
+            expanded=False,
+        ):
+            st.caption(
+                f"Pokr. <{_MIN_COVERAGE_PCT}%: izmerena DT potrošnja pokriva manje od trećine fidera. "
+                "Gubici su razlika F11_energija − parcijalni_DT_zbir, tj. gornja granica."
+            )
+            st.dataframe(df11_lowcov, use_container_width=True, height=300)
 
     if not df11_anom.empty:
         with st.expander(

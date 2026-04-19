@@ -55,10 +55,12 @@ def load_f11() -> pd.DataFrame:
         f11_load AS (
             SELECT
                 d.Feeder11Id,
-                SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
-                SUM(d.NameplateRating) * 1.0      AS S_nominal_kVA,
-                COUNT(*)                           AS dt_total,
-                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads
+                SUM(ISNULL(s.S_kVA, 0))                                              AS S_measured_kVA,
+                -- S_nominal only for DTs that have reads — ensures apples-to-apples comparison
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN d.NameplateRating ELSE 0 END) * 1.0 AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0                                          AS S_nominal_all_kVA,
+                COUNT(*)                                                               AS dt_total,
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END)                   AS dt_with_reads
             FROM DistributionSubstation d
             LEFT JOIN s_dt s ON s.Mid = d.MeterId
             WHERE d.Feeder11Id IS NOT NULL AND d.NameplateRating > 0
@@ -76,6 +78,7 @@ def load_f11() -> pd.DataFrame:
             f11.Name                                                AS [Feeder11],
             ROUND(fl.S_measured_kVA, 2)                            AS [S mereno (kVA)],
             ROUND(fl.S_nominal_kVA, 2)                             AS [S nominalno (kVA)],
+            ROUND(fl.S_nominal_all_kVA, 2)                         AS [S nominalno sve DT (kVA)],
             ROUND(fl.S_measured_kVA / fl.S_nominal_kVA * 100, 1)  AS [Opterećenje (%)],
             fl.dt_with_reads                                        AS [DT merila],
             fl.dt_total                                             AS [DT ukupno],
@@ -174,10 +177,11 @@ def load_f33() -> pd.DataFrame:
         dt_load AS (
             SELECT
                 d.Feeder11Id,
-                SUM(ISNULL(s.S_kVA, 0))          AS S_measured_kVA,
-                SUM(d.NameplateRating) * 1.0      AS S_nominal_kVA,
-                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END) AS dt_with_reads,
-                COUNT(*)                           AS dt_total
+                SUM(ISNULL(s.S_kVA, 0))                                              AS S_measured_kVA,
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN d.NameplateRating ELSE 0 END) * 1.0 AS S_nominal_kVA,
+                SUM(d.NameplateRating) * 1.0                                          AS S_nominal_all_kVA,
+                SUM(CASE WHEN s.Mid IS NOT NULL THEN 1 ELSE 0 END)                   AS dt_with_reads,
+                COUNT(*)                                                               AS dt_total
             FROM DistributionSubstation d
             LEFT JOIN s_dt s ON s.Mid = d.MeterId
             WHERE d.Feeder11Id IS NOT NULL AND d.NameplateRating > 0
@@ -188,6 +192,7 @@ def load_f33() -> pd.DataFrame:
                 fs.Feeders33Id,
                 SUM(dl.S_measured_kVA)             AS S_measured_kVA,
                 SUM(dl.S_nominal_kVA)              AS S_nominal_kVA,
+                SUM(dl.S_nominal_all_kVA)          AS S_nominal_all_kVA,
                 SUM(dl.dt_with_reads)              AS dt_with_reads,
                 SUM(dl.dt_total)                   AS dt_total,
                 STRING_AGG(sub.Name, ', ')         AS ss_names
@@ -203,6 +208,7 @@ def load_f33() -> pd.DataFrame:
             fl.ss_names                                                      AS [Podstanice (SS)],
             ROUND(fl.S_measured_kVA, 2)                                     AS [S mereno (kVA)],
             ROUND(fl.S_nominal_kVA, 2)                                      AS [S nominalno (kVA)],
+            ROUND(fl.S_nominal_all_kVA, 2)                                  AS [S nominalno sve DT (kVA)],
             ROUND(fl.S_measured_kVA / fl.S_nominal_kVA * 100, 1)           AS [Opterećenje (%)],
             fl.dt_with_reads                                                 AS [DT merila],
             fl.dt_total                                                      AS [DT ukupno],
@@ -355,7 +361,7 @@ def _capacity_scatter(df: pd.DataFrame, name_col: str, section_label: str) -> No
     apply_dark_theme(fig)
     fig.update_layout(
         title=f"Instalisani kapacitet vs. Trenutno opterećenje — {section_label}",
-        xaxis_title="S nominalno (kVA) — instalisani kapacitet transformatora",
+        xaxis_title="S nominalno merenih DT (kVA) — kapacitet samo transformatora sa merenjima",
         yaxis_title="S mereno (kVA) — izmjereno opterećenje",
         height=520,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
