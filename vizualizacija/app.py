@@ -145,14 +145,14 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    if st.button("🔄 Osvježi podatke", use_container_width=True):
-        load_data.clear()
-        st.rerun()
-
     data = load_data()
 
-    st.divider()
-    st.subheader("Slojevi mape")
+    st.markdown(
+        '<p style="color:#FF6B35;font-size:0.75rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.12em;'
+        'text-align:center;margin:0 0 0.75rem 0;">🗺️ Slojevi mape</p>',
+        unsafe_allow_html=True,
+    )
 
     ts_name_to_id = dict(zip(
         data["transmission_stations"]["Name"],
@@ -160,7 +160,7 @@ with st.sidebar:
     ))
     ts_names = data["transmission_stations"]["Name"].dropna().tolist()
     selected_ts_names = st.multiselect(
-        "Transmission Stations (110kV+)",
+        "Prenosne stanice",
         options=ts_names,
         default=[],
         placeholder="Prikaži sve...",
@@ -182,7 +182,7 @@ with st.sidebar:
     ))
     ss_names_filtered = ss_options_df["Name"].dropna().tolist()
     selected_ss_names = st.multiselect(
-        "Substations (33kV)",
+        "Podstanice",
         options=ss_names_filtered,
         default=[],
         placeholder="Prikaži sve..." if not ts_ids else f"Filtrirano ({len(ss_names_filtered)})...",
@@ -190,19 +190,24 @@ with st.sidebar:
     ss_ids = [ss_name_to_id[n] for n in selected_ss_names] or None
 
     st.divider()
-    st.subheader("Filteri")
+    st.markdown(
+        '<p style="color:#FF6B35;font-size:0.75rem;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.12em;'
+        'text-align:center;margin:0 0 0.75rem 0;">🔍 Filteri</p>',
+        unsafe_allow_html=True,
+    )
 
     f11_with_dt = set(data["distribution_substations"]["Feeder11Id"].dropna().astype(int))
     f11_df = data["feeders11"][data["feeders11"]["Id"].isin(f11_with_dt)]
     if ss_ids:
         f11_df = f11_df[f11_df["SsId"].isin(ss_ids)]
-    placeholder = f"Filtrirano ({len(f11_df)})..." if ss_ids else "Svi Feeders11"
+    placeholder = f"Filtrirano ({len(f11_df)})..." if ss_ids else "Svi Feederi"
     feeder11_options = {placeholder: None} | {
         f"{row['Name']} (Id: {row['Id']})": int(row["Id"])
         for _, row in f11_df.iterrows()
     }
     feeder11_filter = feeder11_options[
-        st.selectbox("Feeder11", list(feeder11_options.keys()))
+        st.selectbox("Feederi", list(feeder11_options.keys()))
     ]
 
     st.divider()
