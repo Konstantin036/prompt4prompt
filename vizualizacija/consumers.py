@@ -71,35 +71,6 @@ def load_consumer_estimates() -> pd.DataFrame:
         conn.close()
 
 
-@st.cache_data
-def load_no_reading_dts() -> pd.DataFrame:
-    """DTs that have no MeterId or no MeterReads rows for V/I channels."""
-    conn = get_connection()
-    try:
-        query = """
-        WITH meters_with_reads AS (
-            SELECT DISTINCT Mid FROM MeterReads WHERE Cid IN (6,7,8,9,10,11)
-        )
-        SELECT
-            d.Name                                   AS [DT Stanica],
-            d.NameplateRating                        AS [Snaga (kVA)],
-            ISNULL(f11.Name, 'N/A')                 AS [Feeder11],
-            ISNULL(sub.Name, 'N/A')                 AS [Podstanica (SS)],
-            CASE
-                WHEN d.MeterId IS NULL THEN 'Nema merača'
-                ELSE 'Nema očitavanja V/I'
-            END                                      AS [Razlog]
-        FROM DistributionSubstation d
-        LEFT JOIN meters_with_reads mwr ON mwr.Mid = d.MeterId
-        LEFT JOIN Feeders11  f11 ON f11.Id  = d.Feeder11Id
-        LEFT JOIN Substations sub ON sub.Id = f11.SsId
-        WHERE d.MeterId IS NULL OR mwr.Mid IS NULL
-        ORDER BY sub.Name, f11.Name, d.Name
-        """
-        return pd.read_sql(query, conn)
-    finally:
-        conn.close()
-
 
 def _aggregate_by_feeder(df: pd.DataFrame, kva_per_consumer: float) -> pd.DataFrame:
     """Pure function: aggregate DT-level DataFrame to F11 feeder level."""
@@ -266,7 +237,6 @@ def show_consumers() -> None:
 
     if df.empty:
         st.warning("Nema mernih podataka (V/I) za estimaciju potrošača.")
-        _show_no_readings()
         return
 
     kva_per_consumer = st.slider(
@@ -294,21 +264,3 @@ def show_consumers() -> None:
     with col_pie:
         _ts_donut(f11_agg)
 
-    with st.expander("Detalji po DT stanicama"):
-        st.dataframe(
-            df[["TS", "Podstanica (SS)", "Feeder11", "DT Stanica",
-                "Snaga (kVA)", "S (kVA)", "Poslednje merenje"]],
-            use_container_width=True,
-            height=400,
-        )
-
-    st.divider()
-    _show_no_readings()
-
-
-def _show_no_readings() -> None:
-    df_no = load_no_reading_dts()
-    st.warning(
-        f"**{len(df_no)} stanica bez merenja** — potrebno izvršiti pregled na terenu."
-    )
-    st.dataframe(df_no, use_container_width=True, height=350)

@@ -245,6 +245,8 @@ tab_map, tab_losses, tab_consumers, tab_load, tab_outages, tab_data = st.tabs([
 ])
 
 with tab_map:
+    expand_map = st.toggle("Proširi mapu", value=False)
+    map_height = 950 if expand_map else 650
     m = create_map(
         data,
         feeder11_filter=feeder11_filter,
@@ -252,7 +254,7 @@ with tab_map:
         ts_ids=ts_ids,
         ss_ids=ss_ids,
     )
-    st_folium(m, use_container_width=True, height=650, returned_objects=[])
+    st_folium(m, use_container_width=True, height=map_height, returned_objects=[])
 
 with tab_losses:
     show_losses()
