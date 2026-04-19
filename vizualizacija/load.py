@@ -48,9 +48,13 @@ def load_f11() -> pd.DataFrame:
                        ISNULL(V_C * I_C, 0)
                    ) / 1000000.0, 2) AS S_kVA
             FROM pivoted
-            WHERE (V_A IS NOT NULL AND I_A IS NOT NULL)
-               OR (V_B IS NOT NULL AND I_B IS NOT NULL)
-               OR (V_C IS NOT NULL AND I_C IS NOT NULL)
+            WHERE ((V_A IS NOT NULL AND I_A IS NOT NULL)
+               OR  (V_B IS NOT NULL AND I_B IS NOT NULL)
+               OR  (V_C IS NOT NULL AND I_C IS NOT NULL))
+              -- Exclude meters on 11kV primary side (V > 30000 centivolt = > 300V)
+              AND ISNULL(V_A, 0) < 30000
+              AND ISNULL(V_B, 0) < 30000
+              AND ISNULL(V_C, 0) < 30000
         ),
         f11_load AS (
             SELECT
@@ -170,9 +174,12 @@ def load_f33() -> pd.DataFrame:
                        ISNULL(V_C * I_C, 0)
                    ) / 1000000.0, 2) AS S_kVA
             FROM pivoted
-            WHERE (V_A IS NOT NULL AND I_A IS NOT NULL)
-               OR (V_B IS NOT NULL AND I_B IS NOT NULL)
-               OR (V_C IS NOT NULL AND I_C IS NOT NULL)
+            WHERE ((V_A IS NOT NULL AND I_A IS NOT NULL)
+               OR  (V_B IS NOT NULL AND I_B IS NOT NULL)
+               OR  (V_C IS NOT NULL AND I_C IS NOT NULL))
+              AND ISNULL(V_A, 0) < 30000
+              AND ISNULL(V_B, 0) < 30000
+              AND ISNULL(V_C, 0) < 30000
         ),
         dt_load AS (
             SELECT
