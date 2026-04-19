@@ -1,0 +1,45 @@
+Dobar dan svima mi vam predstavljamo web aplikaciju pod nazivom Grid Analytics. Ideja jeste da na pametan i vizuelno lep nacin priakzemo podatke vezane za elektrodistribuciju u jednom delu nigerije.
+
+
+Prilikom pokretanju same aplikacije imamo uvid u prvu funkcionalnost koja se sastoji od samog prikaza elektrodistibutivne mreze priakzanoj na samoj mapi nigerije .Prvi korak jeste bio filtriranje stanica koje nisu bile povezane na vodove kao i vodova koji nisu bili povezani na stanice.Kako bismo ustedili na kolicini kabla potrebnoj za povezivanje svih stanica koristili smo algoritam koji ce da spoji sve distributivne transformatore koristeci jedan kabl umesto da iz svake sub satnice ide zaseban kabl.
+
+
+
+Strukturu prikaza mreze moguce je menjati pomocu menija kontrolna tabla koji se nalazi sa leve strane ekrana.
+Kao sto mozemo da vidimo u mrezi su trenutno prikaine sve TS, SS, DT stanice i svi feederi.
+Razlicite grupacije DT stanica koje su podredjene jednstvenoj SS stanici su prikazane razlicitim bojama.
+takodje nasa mapa je interaktivna pa je klikom   na bilo koji od stanica moguce dobiti informaciju o njoj.
+U meniju kontrolne Table moguce je izvrsiti odabir datih stanica koje ce biti prikazane na mapi.
+U primeru je odabrana TS stanica AT3 sa svim svoji SS stanicama i svim svojim vodovima.
+Nakon toga odabrana je samo jedna SS stanica za prikaz radi lakseg uocavanja pojedinacnih vodova koji pripadaju toj stanici.
+i na kraju imamo opciju i da odaberemo i specifican fider11
+Takodje mozemo pratiti statistiku mreze koju prikazujemo na kojoj vidimo broj ts ss i dt stanica 
+
+
+U ovoj kartici merimo gubitke na vodovima  koje smo racunali kao ulaz i suma izlaza iz stanice.
+Kako bismo dobili gubitke na vodovima izvrsili smo filtriranje svih vrednosti cija je izmerena energija izlaza jednaka nuli ili nije definisana  kako bismo pousali da priakzemo sto realniju sliku.
+Pored ukupnih priakzujemo i prosecne gubitke po vodovima .
+( anomalije , fizicki je nemoguce da potrosimo vise energije nego sto nam dodje , moguce zbog neuskladjenosti brojila)
+Takodje prikazujemo i tabele sa anomalijama i vodovima sa nepotpunim merenjima koje smo iskljucili iz analize.
+
+
+Estimacija realnog broj potrosaca merimo kao odnos izmerene prividne snage dobije iz napona i jacine struje faza i potrosnje po potrosacu koju namestamo preko slajdera.
+Eliminisali smo one koje nisu imali podatke neophodne za racunanje prividne snage
+Na kartici smo priakzali hijerarhiju  od ts do dt
+
+
+Proracun za opterecenje smo vrsili tako sto smo poredili prividnu snagu sa nominalnom.
+Na ovoj kartici smo predstavili na graficima prosecno opterecenje po vodovima  za vod f11 i vod f33.
+
+
+
+Nestanak struje smo analizirali tako sto smo pratili opterecenje i ako kod uzatopnih ocitavanja se priemti neobicno velika vremenska pauza predpsotavljamo da merac nije slao podatke tj nije imao napjanje.
+Prvi grafik pokazuje koliko razlicitih meraca je imalo duzi razmak izmedju merenja po danu.
+drugi grafik - svaka atcka predstavlja sat kada je vise od 5 meraca u istom satu izgubilo signal.
+
+
+
+I za kraj omogucili da u okviru kartice podaci mozemo pretraziti, preuzeti i ocitati osnovne vrednosti o svim stanicamam i vodovima.
+
+Hvala na paznji
+
